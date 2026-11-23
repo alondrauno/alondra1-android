@@ -1,0 +1,28 @@
+# Gradle / Android Studio
+.gradle/
+build/
+/captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+*.iml
+.idea/
+.navigation/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Signing and credentials: never commit
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
