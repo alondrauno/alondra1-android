@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+. Product decision (README → Data safety):
+     * Google cloud backup: nothing. OS backups are not Alondra1 Cloud Sync and must not upload personal content.
+     * Device-to-device transfer: tasks, notes, events and settings move to the new phone; shared preferences
+       (where account tokens live) are not included, so tokens never move. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="database" path="." />
+        <include domain="file" path="datastore/settings.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

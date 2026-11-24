@@ -4,31 +4,108 @@
 
 [![ci](https://github.com/nikita4sea/alondra1-android/actions/workflows/ci.yml/badge.svg)](https://github.com/nikita4sea/alondra1-android/actions/workflows/ci.yml)
 
-Planned Android client of Alondra1 ([spec §11](https://github.com/nikita4sea/alondra1-backend/blob/main/docs/BACKEND_SPEC.md#11-client-requirements)). **Nothing is implemented yet.**
+Personal **To-do**, **Notes** and **Calendar** for Android phones and tablets. Local-first: everything works offline, with no account, and stays on the device. Optional paid **Cloud Sync** uses the Alondra1 backend ([alondra1-backend](https://github.com/nikita4sea/alondra1-backend)); see [Cloud account and sync](#cloud-account-and-sync).
 
-## Scope
+Phase 1 scope and rules: [docs/CLIENT-REQUIREMENTS.md](docs/CLIENT-REQUIREMENTS.md). Not in this app: Mail, Contacts, attachments, recurring tasks, system-calendar access.
 
-Local tasks and portable settings in Room/SQLite with an outbox, email-code sign-in, Personal/Family/Organization space selection, and sync against the same API contract and fixtures as Windows. Credentials go to the Android Keystore; background sync uses WorkManager (best effort, subject to OS constraints). The mail, calendar, and organizer integrations of the Windows app are not part of this scope.
+## Build and run
 
-Details: [docs/CLIENT-REQUIREMENTS.md](docs/CLIENT-REQUIREMENTS.md).
-
-## Getting started
-
-When the project is created, put the Android Studio project (Gradle wrapper at the repository root) here. Expected commands:
+You need JDK 17 and the Android SDK (platform 35). Android Studio works as is; from a terminal:
 
 ```sh
-./gradlew lint test assembleDebug
+./gradlew assembleDebug                       # app/build/outputs/apk/debug/app-debug.apk
+./gradlew installDebug                        # onto a connected device or emulator
+./gradlew lintDebug testDebugUnitTest         # lint + all JVM tests (unit, Room, Robolectric UI)
+./gradlew connectedDebugAndroidTest           # dialog flows on a device/emulator
+./gradlew bundleRelease                       # app/build/outputs/bundle/release/app-release.aab
 ```
 
-Cloud settings for development (API base URL and so on) go in a local `.env` copied from [.env.example](.env.example); never commit it or any credentials.
+- **Min / target SDK:** 29 (Android 10) / 35.
+- **Release signing:** only from environment variables in CI (`ALONDRA1_KEYSTORE_FILE`, `ALONDRA1_KEYSTORE_PASSWORD`, `ALONDRA1_KEY_ALIAS`, `ALONDRA1_KEY_PASSWORD`). Keys are never committed; without them the bundle is unsigned.
+- **Cloud API URL:** `-PapiBaseUrl=https://api.example.com` (or in `~/.gradle/gradle.properties`). Empty = a free, local-only build that never opens a network connection. See [.env.example](.env.example).
+- **Dependencies:** versions are pinned in [gradle/libs.versions.toml](gradle/libs.versions.toml); the Gradle wrapper is pinned and checksummed by Gradle.
 
-## CI
+## Architecture
 
-The [`ci`](.github/workflows/ci.yml) workflow checks Markdown links and scans for secrets on every push and pull request. Its build job starts automatically once the project files exist (it is skipped until then).
+Kotlin, Jetpack Compose with Material 3, single activity, Navigation Compose, MVVM with `StateFlow`, Room, DataStore, WorkManager. Dependencies are wired by hand in `AppContainer` (no DI framework).
 
-## Related repositories
+| Package | Contents |
+| --- | --- |
+| `domain/` | Pure rules: smart views, sorting, counts, note titles, event dates and validation. Unit-tested without Android. |
+| `data/local/` | Room entities (field names and meanings follow the shared task contract), converters, DAOs, versioned schema in `app/schemas/`. |
+| `data/repository/` | Offline-first repositories. All writes are local and immediate; multi-record changes run in transactions. |
+| `data/notifications/` | Notification channels and reminders (WorkManager). |
+| `data/settings/` | DataStore settings. |
+| `data/sync/` | The sync hook. The free build uses `ChangeRecorder.LocalOnly`: nothing is queued or sent. |
+| `features/` | Screens and view models: `todo`, `notes`, `calendar`, `search`, `settings`, `onboarding`. |
+| `navigation/` | Bottom bar on phones, navigation rail from 600dp, list/detail panes from 840dp; `alondra1://task|note|event/{id}` deep links. |
+| `design/` | Brand tokens and the Material theme (dark by default, light, follow system). |
 
-[alondra1-backend](https://github.com/nikita4sea/alondra1-backend) (cloud API and contract) · [alondra1-windows](https://github.com/nikita4sea/alondra1-windows) (reference client) · [alondra1-www](https://github.com/nikita4sea/alondra1-www)
+## To-do rules
+
+Same semantics as the Windows app ([shared task contract](https://github.com/nikita4sea/alondra1-backend/tree/main/contract)):
+
+- **My Day** contains tasks whose My Day date is today. It's explicit: tasks are added from quick add in My Day, from the task detail, or from Windows, and the view starts empty each day. Tasks due today are not added automatically.
+- **Important:** open and starred. **Planned:** open with a due date. **Upcoming:** open and due after today. **Unscheduled:** open without a due date.
+- **Overdue:** open and due before today, or due today at a time that has passed. A date-only task becomes overdue when its local day ends.
+- **All Tasks:** everything not deleted, with an Open/All/Completed filter. **Completed:** newest completion first.
+- Counts are computed from the same rules as the lists, so they always match.
+- **Quick add** in My Day adds to My Day, in Important stars the task, in a list adds to that list, and otherwise uses the default list (Settings). Titles are trimmed, 1–500 characters.
+- **Deleting a list** asks first. By default its tasks move to **Tasks**; the default list can't be deleted.
+- Complete, delete and restore offer **Undo**. Deletes are tombstones, so a future sync can't bring a task back.
+- New IDs are 32 lowercase hex characters (as on Windows), dates are date-only, and times are local wall-clock values.
+
+## Notes and Calendar
+
+- **Notes** are rich text, edited with the same editor as the Windows app, so formatting is kept on both ([docs/NOTES.md](docs/NOTES.md)):
+  - fonts, sizes and colors, highlight, headings, alignment;
+  - lists and nested checklists;
+  - tables;
+  - pictures from the photo picker or shared from other apps.
+
+  Notes also have folders, Favorites, pinning, Archive and a 30-day Trash, plus full-text search. They autosave after a short pause and right away when you leave the note or the app goes to the background. A checklist item can become a task.
+- **Calendar** shows a month grid with a day panel, or an agenda for the next 60 days, filtered by Events, Tasks or Both. Task due dates are shown in their own color and open the task; they are never copied as events.
+- **Events:** timed events store UTC instants plus their time zone. All-day events store dates only (end inclusive), so they never shift between zones. The end must not be before the start. All-day reminders count from 09:00 on the start day.
+- The app does not read or write the system calendar and does not ask for calendar permission.
+
+## Reminders and notifications
+
+- Separate channels for task and event reminders. Each item has one unique pending reminder, so edits replace it and never duplicate it. Completing or deleting cancels it.
+- Delivery is approximate (WorkManager). The app doesn't request exact alarms or battery-optimization exemptions. Reminders survive reboots and are re-planned when the time zone or clock changes, keeping their wall-clock time.
+- `POST_NOTIFICATIONS` is requested only when you turn on a reminder (Android 13+). If it's denied, the app explains that and keeps working.
+- Lock-screen privacy is on by default: the lock screen shows only "Alondra1 reminder".
+
+## Data safety
+
+- The database lives in the app's private storage, with no exported content providers.
+- **Google cloud backup:** nothing is backed up (`data_extraction_rules.xml`), because OS backups are not Alondra1 Cloud Sync. **Device-to-device transfer** brings tasks, notes, events and settings to a new phone; shared preferences (account tokens) are excluded.
+- No analytics, no crash upload, no ads. In free mode, no network request is made at all.
+- **Settings → Privacy & data → Delete local data** wipes this device only, after showing counts and asking you to type DELETE.
+- Schema changes need a new Room version and migration. `RepositoriesTest.committedSchemaMatchesTheEntities` fails if the entities change without one. Destructive migrations are never used.
+
+## Free and paid
+
+| Capability | Free | Paid (Personal and up) |
+| --- | --- | --- |
+| Tasks, lists, smart views, reminders, notes, calendar, offline search | Yes | Yes |
+| Cloud Sync of tasks, lists, notes and events | No | Yes, after you opt in |
+| Archive (mail archive and search) | No | Backend only; no Android screen yet |
+
+Completed tasks and Undo are free and are not "Archive".
+
+## Cloud account and sync
+
+Signing in, plans and opt-in Cloud Sync are in **Settings → Account & Cloud**, and appear only when the build has an API URL. See [docs/CLOUD.md](docs/CLOUD.md).
+
+## Tests
+
+- **JVM** (`testDebugUnitTest`):
+  - smart-view, Overdue and DST rules; note and event rules;
+  - repositories on an in-memory Room database (transactions, list deletion, Undo, reminders, LIKE escaping);
+  - persistence across a database restart, and the schema identity check;
+  - Robolectric Compose flows: quick add, complete and Undo; task edit; note autosave across activity recreation; event creation and validation; cross-module search; first run; tablet two-pane; light theme at 200% font.
+- **Instrumented** (`connectedDebugAndroidTest`): text-entry dialogs (create task from note, new list, add task from the calendar). Robolectric can't idle a Compose `AlertDialog` that contains a text field, so these run on an emulator.
+- **Manual release matrix** (from the spec): small phone (360dp), large phone, 7–11" tablet, portrait and landscape, TalkBack, keyboard, notifications denied, airplane mode, DST change, low storage, fresh and upgraded installs.
 
 ## License
 

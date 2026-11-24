@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Alondra1</string>
+    <string name="channel_tasks">Task reminders</string>
+    <string name="channel_tasks_desc">Reminders you set on tasks</string>
+    <string name="channel_events">Calendar reminders</string>
+    <string name="channel_events_desc">Reminders you set on calendar events</string>
+</resources>
