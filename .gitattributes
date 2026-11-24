@@ -1,0 +1,2 @@
+# Discovery fixtures are signed byte for byte (mirror of alondra1-backend contract/fixtures/discovery-v1).
+app/src/test/resources/discovery-v1/** -text

@@ -17,8 +17,12 @@ import java.util.concurrent.TimeUnit
 /** Background sync: only with a network, with exponential backoff, never a tight loop. */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val engine = (applicationContext as Alondra1App).container.syncEngine ?: return Result.success()
-        return when (engine.syncNow().state) {
+        val container = (applicationContext as Alondra1App).container
+        val engine = container.syncEngine ?: return Result.success()
+        container.endpoints?.refreshIfDue() // signed discovery: every 15 minutes with jitter
+        val state = engine.syncNow().state
+        if (state == SyncState.OFFLINE) container.endpoints?.refreshIfDue(force = true) // maybe the endpoints moved
+        return when (state) {
             SyncState.OFFLINE, SyncState.ERROR_RETRYABLE -> Result.retry()
             else -> Result.success()
         }

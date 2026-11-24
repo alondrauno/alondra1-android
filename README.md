@@ -13,16 +13,17 @@ Phase 1 scope and rules: [docs/CLIENT-REQUIREMENTS.md](docs/CLIENT-REQUIREMENTS.
 You need JDK 17 and the Android SDK (platform 35). Android Studio works as is; from a terminal:
 
 ```sh
-./gradlew assembleDebug                       # app/build/outputs/apk/debug/app-debug.apk
-./gradlew installDebug                        # onto a connected device or emulator
-./gradlew lintDebug testDebugUnitTest         # lint + all JVM tests (unit, Room, Robolectric UI)
-./gradlew connectedDebugAndroidTest           # dialog flows on a device/emulator
-./gradlew bundleRelease                       # app/build/outputs/bundle/release/app-release.aab
+./gradlew assembleProdDebug                   # app/build/outputs/apk/prod/debug/app-prod-debug.apk
+./gradlew installDevDebug                     # Alondra1 Dev (com.alondra1.app.dev.debug) next to prod
+./gradlew lintProdDebug testProdDebugUnitTest # lint + all JVM tests (unit, Room, Robolectric UI)
+./gradlew connectedProdDebugAndroidTest       # dialog flows on a device/emulator
+./gradlew bundleProdRelease                   # app/build/outputs/bundle/prodRelease/app-prod-release.aab
+scripts/check-environment.sh prod app/build/outputs/bundle/prodRelease/app-prod-release.aab
 ```
 
 - **Min / target SDK:** 29 (Android 10) / 35.
 - **Release signing:** only from environment variables in CI (`ALONDRA1_KEYSTORE_FILE`, `ALONDRA1_KEYSTORE_PASSWORD`, `ALONDRA1_KEY_ALIAS`, `ALONDRA1_KEY_PASSWORD`). Keys are never committed; without them the bundle is unsigned.
-- **Cloud API URL:** `-PapiBaseUrl=https://api.example.com` (or in `~/.gradle/gradle.properties`). Empty = a free, local-only build that never opens a network connection. See [.env.example](.env.example).
+- **Environments:** product flavors `prod` and `dev` (completion spec v1.1 §8.3): own application id, name (*Alondra1 Dev*), API origin, discovery sources and trusted keys. Release builds find their endpoints through signed discovery (`cloud/discovery/`); debug builds use the local development server (`http://10.0.2.2:8080`, override with `-PapiBaseUrl=...`). A dev build never talks to prod and the reverse. Nothing contacts the network until the user turns the cloud on.
 - **Dependencies:** versions are pinned in [gradle/libs.versions.toml](gradle/libs.versions.toml); the Gradle wrapper is pinned and checksummed by Gradle.
 
 ## Architecture

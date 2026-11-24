@@ -175,7 +175,12 @@ Code: `auth/` (`ApiClient`, `SessionStore`, `AccountRepository`, `CloudAccountSe
 | CLOUD-AUTH-01 | Sign in with a 6-digit email code | Done | Shown only in builds with an API URL. |
 | CLOUD-AUTH-02 | Tokens in EncryptedSharedPreferences | Done | |
 | CLOUD-PLAN-01 | Plan and entitlements from the server | Done | |
-| CLOUD-CFG-01 | Debug: `http://10.0.2.2:8080`; release: `-PapiBaseUrl=https://…`; no URL = free local-only build with no network | Done | |
+| CLOUD-CFG-01 | Release: signed discovery of the flavor's environment; debug: local dev server `http://10.0.2.2:8080` (`-PapiBaseUrl` overrides) | Done | A fixed address must be loopback/emulator host or a host of the build's environment. |
+| CLOUD-ENV-01 | Product flavors `prod` and `dev`: application id `com.alondra1.app(.dev)`, name *Alondra1 (Dev)*, API origin, discovery sources and trusted keys | Done | `BuildEnvironment`, `app/build.gradle.kts`. |
+| CLOUD-DISC-01 | Signed discovery manifest: Ed25519 (own implementation, minSdk 29), environment, validity, monotonic version, host allowlist | Done | Passes the 32 shared fixture cases (`src/test/resources/discovery-v1`). |
+| CLOUD-DISC-02 | Primary, mirror, verified cache in DataStore, bundled list until its expiry; no redirects, conditional GET; refresh every 15 min with jitter and after an offline sync | Done | `CloudEndpoints`, `SyncWorker`. |
+| CLOUD-DISC-03 | Failover on transport errors, timeouts, 502/503/504 (Retry-After); never on 401/403/404/429; same body; no refresh replay | Done | `FailoverInterceptor`, `DiscoveryTest`. |
+| CLOUD-SPACE-01 | Choose among several spaces; per-space data | Gap | Personal space (spec v1.1 §8.3, P0 personal / P1 shared). |
 | MAIL-ARCH-01 | Mail Archive | Gap | Windows only (no mail on Android). |
 
 ## 7. Cloud Sync (`SYNC`)
@@ -212,10 +217,13 @@ Code: `features/settings/SettingsScreen.kt`, `data/settings/SettingsRepository.k
 
 | ID | Atomic feature | Status | Notes |
 | --- | --- | --- | --- |
-| OPS-BUILD-01 | Debug APK, release AAB; min SDK 29, target 35 | Done | |
+| OPS-BUILD-01 | Flavors × build types (prodDebug, prodRelease, devDebug, devRelease); min SDK 29, target 35 | Done | Check the current Play target-API policy before publishing. |
+| OPS-ENV-01 | `scripts/check-environment.sh`: a bundle of one environment contains no endpoint of the other, prod no debug server | Done | Run in CI and before publishing. |
+| OPS-REL-01 | Dev APK (debug-signed) on every main push as a workflow artifact | Done | `release.yml`. |
+| OPS-REL-02 | Prod bundle on `vX.Y.Z`, signed with the upload key and published only after approval in the `prod` environment; Play internal track when configured | Done | Secrets `ANDROID_UPLOAD_*`, `PLAY_SERVICE_ACCOUNT_JSON`. |
 | OPS-SIGN-01 | Release signing only from CI environment variables | Done | |
-| OPS-DB-01 | Room schema exported to `app/schemas`; `committedSchemaMatchesTheEntities` fails without a new version and migration | Done | Current version **4**. |
-| OPS-CI-01 | CI: lint, JVM tests, debug APK and release bundle | Done | Device tests run manually (`connectedDebugAndroidTest`). |
+| OPS-DB-01 | Room schema exported to `app/schemas`; `committedSchemaMatchesTheEntities` fails without a new version and migration | Done | Current version **5**. |
+| OPS-CI-01 | CI: lint, JVM tests of both flavors, dev APK, both release bundles with the environment check, emulator tests (`connectedProdDebugAndroidTest`) | Done | Actions pinned to commit SHAs. |
 
 ---
 

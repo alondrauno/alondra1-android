@@ -31,6 +31,8 @@ class AppContainer(
     val cloud: Cloud? = null,
     /** Where note pictures are stored (files/notes-assets in the app). */
     assetsDir: java.io.File = java.io.File(System.getProperty("java.io.tmpdir"), "alondra1-notes-assets"),
+    /** API endpoints (signed discovery and failover, or a fixed development address); null without cloud. */
+    val endpoints: com.alondra1.app.cloud.discovery.CloudEndpoints? = null,
 ) {
     class Cloud(val session: SessionStore, val api: ApiClient, val account: AccountRepository, val engine: SyncEngine, val onSyncConfigured: (Boolean) -> Unit)
 
@@ -66,18 +68,20 @@ class AppContainer(
             val db = AppDatabase.build(context)
             val reminders = WorkManagerReminderScheduler(context, time)
             val assetsDir = java.io.File(context.filesDir, "notes-assets")
-            if (BuildConfig.API_BASE_URL.isBlank()) {
-                return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), assetsDir = assetsDir)
-            }
+            // A build whose fixed address belongs to the other environment, or whose bundled endpoint list has expired
+            // with nothing verified since, has no cloud: local features are unaffected.
+            val endpoints = com.alondra1.app.cloud.discovery.CloudEndpoints.create(context)
+                ?: return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), assetsDir = assetsDir)
             val session = SessionStore.create(context)
-            val api = ApiClient(BuildConfig.API_BASE_URL, session)
+            val api = ApiClient(endpoints.baseUrl, session, endpoints.http)
             val engine = SyncEngine(db, api, session, time, reminders, java.io.File(context.filesDir, "backups"),
                 com.alondra1.app.data.repository.NoteAssets(db, assetsDir, time))
             val recorder = OutboxRecorder(session, { engine }, { SyncWorker.requestSoon(context) })
             val cloud = Cloud(session, api, AccountRepository(api, session), engine) { enabled ->
                 if (enabled) { SyncWorker.schedulePeriodic(context); SyncWorker.requestSoon(context) } else SyncWorker.cancel(context)
             }
-            return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), changes = recorder, cloud = cloud, assetsDir = assetsDir)
+            return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), changes = recorder, cloud = cloud,
+                assetsDir = assetsDir, endpoints = endpoints)
         }
     }
 }

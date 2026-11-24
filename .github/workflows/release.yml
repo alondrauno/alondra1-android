@@ -1,0 +1,115 @@
+name: release
+
+# Two builds from one commit (completion spec v1.1 §8.3, §10):
+#   - every push to main: the dev app (Alondra1 Dev, application id com.alondra1.app.dev, dev endpoints) as a
+#     debug-signed APK artifact for testers; never published to a store.
+#   - tag vX.Y.Z: the prod bundle is built without secrets and checked, then waits for the reviewers of the "prod"
+#     environment. Only the approved job gets the upload key: it signs exactly that bundle (SHA-256 checked first),
+#     attaches it to the GitHub release and, when a Play service account is configured, uploads it to the internal
+#     track. Promotion to production in Play stays a manual, reviewed step there. A tag alone publishes nothing.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dev-apk:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Tests and the dev APK
+        run: chmod +x gradlew && ./gradlew testDevDebugUnitTest assembleDevDebug
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Alondra1-dev-apk
+          path: app/build/outputs/apk/dev/debug/app-dev-debug.apk
+          retention-days: 14
+
+  prod-bundle:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    outputs:
+      sha256: ${{ steps.sum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Lint, tests, unsigned prod bundle
+        run: chmod +x gradlew && ./gradlew lintProdRelease testProdDebugUnitTest bundleProdRelease
+      - name: Only prod endpoints, no debug server
+        run: scripts/check-environment.sh prod app/build/outputs/bundle/prodRelease/app-prod-release.aab
+      - id: sum
+        run: |
+          sha="$(sha256sum app/build/outputs/bundle/prodRelease/app-prod-release.aab | cut -d' ' -f1)"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "Unsigned prod bundle SHA-256: \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Alondra1-prod-aab-unsigned
+          path: app/build/outputs/bundle/prodRelease/app-prod-release.aab
+          retention-days: 7
+
+  publish:
+    needs: prod-bundle
+    runs-on: ubuntu-24.04
+    environment: prod
+    permissions:
+      contents: write
+    env:
+      PLAY_CONFIGURED: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Alondra1-prod-aab-unsigned
+          path: out
+      - name: The approved build, unchanged
+        run: test "$(sha256sum out/app-prod-release.aab | cut -d' ' -f1)" = "${{ needs.prod-bundle.outputs.sha256 }}"
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Sign with the upload key (prod environment only)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::No upload key in the prod environment: refusing to publish an unsigned bundle."; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          cp out/app-prod-release.aab out/Alondra1.aab
+          jarsigner -keystore "$RUNNER_TEMP/upload.jks" -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" -sigalg SHA256withRSA -digestalg SHA-256 out/Alondra1.aab "$KEY_ALIAS"
+          jarsigner -verify out/Alondra1.aab
+          rm -f "$RUNNER_TEMP/upload.jks"
+          (cd out && sha256sum Alondra1.aab > Alondra1.aab.sha256)
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" out/Alondra1.aab out/Alondra1.aab.sha256 --repo "${{ github.repository }}" --title "Alondra1 for Android ${{ github.ref_name }}" --notes "Signed prod bundle (upload key). Google Play internal track if configured."
+      - name: Upload to the Play internal track (when configured)
+        if: env.PLAY_CONFIGURED == 'true'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.alondra1.app
+          releaseFiles: out/Alondra1.aab
+          track: internal
+          status: draft

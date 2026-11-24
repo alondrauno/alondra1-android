@@ -17,8 +17,8 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "com.alondra1.app.InstrumentedTestRunner"
-        // Cloud API base URL. Empty = cloud features unavailable (free local-only build).
-        // Set with -PapiBaseUrl=https://api.example.com or in ~/.gradle/gradle.properties.
+        // Fixed cloud API address. Empty (release) = signed discovery of the flavor's environment.
+        // Debug builds use the local development server; override with -PapiBaseUrl=...
         buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("apiBaseUrl") ?: ""}\"")
     }
 
@@ -32,6 +32,33 @@ android {
                 keyAlias = System.getenv("ALONDRA1_KEY_ALIAS")
                 keyPassword = System.getenv("ALONDRA1_KEY_PASSWORD")
             }
+        }
+    }
+
+    // One app, two environments (completion spec v1.1 §8.3): separate application ids, names, endpoints and discovery
+    // keys. The prod flavor trusts only prod; a dev build cannot reach prod (BuildEnvironment.allowsAddress).
+    flavorDimensions += "environment"
+    productFlavors {
+        create("prod") {
+            dimension = "environment"
+            resValue("string", "app_name", "Alondra1")
+            buildConfigField("String", "ENVIRONMENT", "\"prod\"")
+            buildConfigField("String", "API_ORIGIN", "\"https://api.alondra1.com\"")
+            buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.alondra1.com/manifest.json\"")
+            buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.alondra1.com/manifest.json\"")
+            // Public keys of the prod discovery signer (alondra1-infra discovery/trust/prod.json); empty until created.
+            buildConfigField("String", "DISCOVERY_TRUST", "\"{\\\"keys\\\": []}\"")
+        }
+        create("dev") {
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name", "Alondra1 Dev")
+            buildConfigField("String", "ENVIRONMENT", "\"dev\"")
+            buildConfigField("String", "API_ORIGIN", "\"https://api.dev.alondra1.com\"")
+            buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.dev.alondra1.com/manifest.json\"")
+            buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.dev.alondra1.com/manifest.json\"")
+            buildConfigField("String", "DISCOVERY_TRUST", "\"{\\\"keys\\\": []}\"")
         }
     }
 
