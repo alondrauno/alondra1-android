@@ -23,6 +23,8 @@ Rich-text notes, compatible with the Windows app.
   - Pictures are uploaded before their note and downloaded after a pull.
   - Edits made on two devices keep both versions as a **(conflict copy)**.
 - **Links.** Tapping a linked task or event chip (or a task link in the text) opens it.
+- **Meeting notes.** An event's screen has **Meeting notes**: it opens the note linked to the event, or creates one from the same template as Windows (date and time, description, Agenda, Notes, Action items).
+- **Sync conflicts.** A note changed on two devices keeps both versions (see Sync). A banner above the note, or **Compare** in Settings → Sync issues, opens the comparison, where you can keep either version, **Combine both** into the note, or keep both as separate notes. The conflict copy goes to Trash. Room schema 4 adds `sync_issues.copyId`.
 - **Fallback.** Without a working system WebView, notes use the plain-text editor, and notes with formatting open read-only so nothing is lost.
 
 Not on Android yet:
@@ -35,4 +37,4 @@ Not on Android yet:
 ## Tests
 
 - `RichNotesTest` and `MigrationTest` (JVM).
-- `DialogFlowsTest` (on a device or emulator) opens a Windows-format document in the real editor and checks it saves unchanged, and turns a checklist item into a task, opens linked tasks and events, and checks that permanent deletion asks first.
+- `DialogFlowsTest` (on a device or emulator) opens a Windows-format document in the real editor and checks it saves unchanged, and turns a checklist item into a task, opens linked tasks and events, and checks that permanent deletion asks first, combines a sync conflict from the compare screen, and creates meeting notes from an event.
