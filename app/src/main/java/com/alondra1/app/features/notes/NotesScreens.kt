@@ -214,6 +214,7 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
     var sortMenu by remember { mutableStateOf(false) }
     var folderDialog by remember { mutableStateOf<Pair<String?, String>?>(null) }
     var confirmEmpty by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf<NoteSummary?>(null) }
     val fmt = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
 
     Scaffold(
@@ -298,7 +299,7 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
                         DropdownMenu(expanded = menuFor == note.id, onDismissRequest = { menuFor = null }) {
                             if (note.trashedUtc != null) {
                                 DropdownMenuItem(text = { Text("Restore") }, onClick = { menuFor = null; viewModel.restore(note) })
-                                DropdownMenuItem(text = { Text("Delete permanently", color = MaterialTheme.colorScheme.error) }, onClick = { menuFor = null; viewModel.deleteForever(note) })
+                                DropdownMenuItem(text = { Text("Delete permanently", color = MaterialTheme.colorScheme.error) }, onClick = { menuFor = null; confirmDelete = note })
                             } else {
                                 DropdownMenuItem(text = { Text(if (note.favorite) "Remove from favorites" else "Add to favorites") }, onClick = { menuFor = null; viewModel.favorite(note) })
                                 DropdownMenuItem(text = { Text(if (note.pinned) "Unpin" else "Pin") }, onClick = { menuFor = null; viewModel.pin(note) })
@@ -356,6 +357,16 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
                     TextButton(onClick = { folderDialog = null }) { Text("Cancel") }
                 }
             },
+        )
+    }
+
+    confirmDelete?.let { note ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Delete note permanently?") },
+            text = { Text("\"${note.title.ifBlank { "Untitled" }}\" is deleted permanently. This cannot be undone.") },
+            confirmButton = { TextButton(onClick = { confirmDelete = null; viewModel.deleteForever(note) }, modifier = Modifier.testTag("confirmDeleteNote")) { Text("Delete permanently", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
         )
     }
 
@@ -504,7 +515,10 @@ class NoteEditorViewModel(private val container: AppContainer, private val handl
     suspend fun eventsForLinking() = container.db.events().all().filter { it.deletedUtc == null }.sortedBy { it.startUtc ?: java.time.Instant.EPOCH }.take(500)
 
     /** A picture from the system picker or another app: stored as an asset, then inserted by the editor. */
-    suspend fun addPicture(bytes: ByteArray): Pair<String, Int?> = container.noteAssets.add(bytes).let { it.sha256 to it.width }
+    suspend fun addPicture(bytes: ByteArray): Pair<String, Int?> {
+        val current = NotesRepository.decodeIds(container.notes.getNote(noteId)?.assetsJson ?: "[]")
+        return container.noteAssets.add(bytes, current).let { it.sha256 to it.width }
+    }
 
     /** A checklist item becomes a task; the note keeps the item and links to the task. */
     suspend fun checklistToTask(text: String, done: Boolean): String {
@@ -539,16 +553,16 @@ class NoteEditorViewModel(private val container: AppContainer, private val handl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NoteEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean = true, onOpenTask: (String) -> Unit = {}) {
+fun NoteEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean = true, onOpenTask: (String) -> Unit = {}, onOpenEvent: (String) -> Unit = {}) {
     val context = LocalContext.current
     val rich = remember { NoteEditorBridge.available(context) }
     if (!viewModel.loaded) return
-    if (rich) RichEditorScreen(viewModel, onClose, showBack, onOpenTask) else PlainEditorScreen(viewModel, onClose, showBack)
+    if (rich) RichEditorScreen(viewModel, onClose, showBack, onOpenTask, onOpenEvent) else PlainEditorScreen(viewModel, onClose, showBack)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean, onOpenTask: (String) -> Unit) {
+private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean, onOpenTask: (String) -> Unit, onOpenEvent: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbar.current
@@ -560,7 +574,7 @@ private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit
 
     val bridge = remember {
         lateinit var self: NoteEditorBridge
-        self = NoteEditorBridge(context, viewModel.assets, onMessage = { m -> scope.launch { handleEditorMessage(m, viewModel, { self }, onOpenTask, context) } },
+        self = NoteEditorBridge(context, viewModel.assets, onMessage = { m -> scope.launch { handleEditorMessage(m, viewModel, { self }, onOpenTask, onOpenEvent, context) } },
             onMissingAsset = { })
         self
     }
@@ -569,6 +583,7 @@ private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit
             uris.forEach { uri ->
                 try {
                     val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } ?: return@forEach
+                    bridge.flush()?.let { viewModel.saveRich(it) } // the per-note limit counts pictures already inserted
                     val (sha, width) = viewModel.addPicture(bytes)
                     bridge.call("insertAsset", buildJsonObject { put("assetId", sha); width?.let { put("width", it) } })
                 } catch (e: NoteAssetException) {
@@ -654,7 +669,7 @@ private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit
         if (viewModel.links.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 viewModel.links.forEach { link ->
-                    AssistChip(onClick = { if (link.type == NoteLink.TASK) onOpenTask(link.id) }, label = { Text((if (link.type == NoteLink.TASK) "✓ " else "📅 ") + (link.label ?: link.id), maxLines = 1) },
+                    AssistChip(onClick = { if (link.type == NoteLink.TASK) onOpenTask(link.id) else if (link.type == NoteLink.EVENT) onOpenEvent(link.id) }, modifier = Modifier.testTag("link:${link.type}:${link.id}"), label = { Text((if (link.type == NoteLink.TASK) "✓ " else "📅 ") + (link.label ?: link.id), maxLines = 1) },
                         trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove link", Modifier.size(16.dp).clickable { scope.launch { viewModel.removeLink(link) } }) })
                 }
             }
@@ -668,7 +683,7 @@ private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit
 /** Set by the rich editor screen: opens the system photo picker. */
 private var pickPictures: () -> Unit = {}
 
-private suspend fun handleEditorMessage(m: JsonObject, vm: NoteEditorViewModel, bridge: () -> NoteEditorBridge, onOpenTask: (String) -> Unit, context: android.content.Context) {
+private suspend fun handleEditorMessage(m: JsonObject, vm: NoteEditorViewModel, bridge: () -> NoteEditorBridge, onOpenTask: (String) -> Unit, onOpenEvent: (String) -> Unit, context: android.content.Context) {
     when ((m["type"] as? JsonPrimitive)?.contentOrNull) {
         "change" -> if (vm.saveRich(m)) bridge().call("saved", "Saved on this device")
         "saveNow" -> bridge().flush()?.let { vm.saveRich(it) }
@@ -677,6 +692,7 @@ private suspend fun handleEditorMessage(m: JsonObject, vm: NoteEditorViewModel, 
             val requestId = m["requestId"]?.jsonPrimitive?.contentOrNull ?: return
             try {
                 val bytes = android.util.Base64.decode(m["data"]?.jsonPrimitive?.contentOrNull.orEmpty(), android.util.Base64.DEFAULT)
+                bridge().flush()?.let { vm.saveRich(it) } // the per-note limit counts pictures already inserted
                 val (sha, width) = vm.addPicture(bytes)
                 bridge().call("imageStored", buildJsonObject { put("requestId", requestId); put("assetId", sha); width?.let { put("width", it) } })
             } catch (e: Exception) {
@@ -691,6 +707,7 @@ private suspend fun handleEditorMessage(m: JsonObject, vm: NoteEditorViewModel, 
         "openLink" -> {
             val href = m["href"]?.jsonPrimitive?.contentOrNull.orEmpty()
             if (href.startsWith("alondra://task/")) onOpenTask(href.removePrefix("alondra://task/"))
+            else if (href.startsWith("alondra://event/")) onOpenEvent(href.removePrefix("alondra://event/"))
             else if (Regex("^(https?|mailto|tel):").containsMatchIn(href)) runCatching {
                 context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(href)))
             }

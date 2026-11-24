@@ -13,16 +13,24 @@ class NoteAssetException(message: String) : Exception(message)
  * name), size-limited, stored once per SHA-256 below files/notes-assets and referenced from documents by that hash.
  * Same rules as the Windows app, so both reference the same picture by the same id.
  */
-class NoteAssets(private val db: AppDatabase, val directory: File, private val time: TimeSource, val maxBytes: Long = 20L shl 20) {
+class NoteAssets(private val db: AppDatabase, val directory: File, private val time: TimeSource, val maxBytes: Long = 20L shl 20,
+                 val maxBytesPerNote: Long = 100L shl 20) {
 
     fun fileOf(sha: String) = File(File(directory, sha.take(2)), sha)
     fun hasFile(sha: String) = isId(sha) && fileOf(sha).isFile
 
-    /** Stores a picture (or returns the stored one with the same content). */
-    suspend fun add(data: ByteArray): NoteAssetEntity {
+    /**
+     * Stores a picture (or returns the stored one with the same content). When [noteAssetIds] (the pictures the note
+     * already uses) is given, the note's pictures may not total more than [maxBytesPerNote].
+     */
+    suspend fun add(data: ByteArray, noteAssetIds: Collection<String>? = null): NoteAssetEntity {
         if (data.size > maxBytes) throw NoteAssetException("The picture is larger than ${maxBytes shr 20} MB.")
         val mime = sniff(data) ?: throw NoteAssetException("Only PNG, JPEG, GIF and WebP pictures can be added.")
         val sha = hash(data)
+        if (noteAssetIds != null && sha !in noteAssetIds) {
+            val total = data.size.toLong() + noteAssetIds.distinct().sumOf { db.noteAssets().get(it)?.bytes ?: 0L }
+            if (total > maxBytesPerNote) throw NoteAssetException("Pictures in one note can total at most ${maxBytesPerNote shr 20} MB.")
+        }
         val existing = db.noteAssets().get(sha)
         val file = fileOf(sha)
         if (existing != null && existing.present && file.isFile) return existing

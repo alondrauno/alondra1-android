@@ -18,6 +18,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import com.alondra1.app.data.local.EventEntity
+import com.alondra1.app.data.repository.NoteLink
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -131,5 +137,53 @@ class DialogFlowsTest {
         rule.waitUntil(10_000) { runBlocking { container.db.tasks().all() }.any { it.title == "Call the plumber" && it.sourceNoteId == "n2" } }
         rule.waitUntil(10_000) { flushed(web).toString().contains("alondra://task/") }
         rule.waitUntil(10_000) { runBlocking { NotesRepository.decodeLinks(container.notes.getNote("n2")!!.linksJson) }.any { it.label == "Call the plumber" } }
+    }
+
+    @Test fun linkedTasksAndEventsOpenFromTheNote() {
+        val task = runBlocking { container.todo.addTask("Book the venue") }
+        val now = java.time.Instant.now()
+        val event = runBlocking { container.calendar.save(EventEntity(id = "", title = "Dentist", allDay = true, startDate = java.time.LocalDate.now(),
+            endDate = java.time.LocalDate.now(), timeZoneId = "UTC", createdUtc = now, modifiedUtc = now)) }
+        runBlocking {
+            container.notes.saveContent("n3", "Links", rich("0".repeat(64)), "", emptyList())
+            container.notes.addLink("n3", NoteLink(NoteLink.TASK, task.id, task.title))
+            container.notes.addLink("n3", NoteLink(NoteLink.EVENT, event.id, event.title))
+        }
+        openNote("Links")
+        rule.waitUntilAtLeastOneExists(hasTestTag("link:event:${event.id}"), 10_000)
+        rule.onNodeWithTag("link:event:${event.id}").performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Dentist"), 10_000)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { rule.activity.onBackPressedDispatcher.onBackPressed() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("link:task:${task.id}"), 10_000)
+        rule.onNodeWithTag("link:task:${task.id}").performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Book the venue"), 10_000)
+    }
+
+    @Test fun deletingANoteFromTrashAsksFirst() {
+        runBlocking {
+            container.notes.saveContent("n4", "Old list", rich("0".repeat(64)), "", emptyList())
+            container.notes.trash(listOf("n4"))
+        }
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab:Notes"), 10_000)
+        rule.onNodeWithTag("tab:Notes").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("noteViews"), 10_000)
+        rule.onNodeWithTag("noteViews").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("noteView:Trash"), 10_000)
+        rule.onNodeWithTag("noteView:Trash").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("note:Old list"), 10_000)
+        rule.onAllNodesWithContentDescription("Note options")[0].performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Delete permanently"), 10_000)
+        rule.onNodeWithText("Delete permanently").performClick()
+        // Nothing is deleted until the user confirms.
+        rule.waitUntilAtLeastOneExists(hasText("Delete note permanently?"), 10_000)
+        assertEquals(null, runBlocking { container.notes.getNote("n4")!!.deletedUtc })
+        rule.onNodeWithText("Cancel").performClick()
+        assertEquals(null, runBlocking { container.notes.getNote("n4")!!.deletedUtc })
+        rule.onAllNodesWithContentDescription("Note options")[0].performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Delete permanently"), 10_000)
+        rule.onNodeWithText("Delete permanently").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("confirmDeleteNote"), 10_000)
+        rule.onNodeWithTag("confirmDeleteNote").performClick()
+        rule.waitUntil(10_000) { runBlocking { container.notes.getNote("n4")!!.deletedUtc } != null }
     }
 }

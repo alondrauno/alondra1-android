@@ -262,7 +262,8 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
                     Box(Modifier.width(460.dp).fillMaxHeight().testTag("detailPane")) {
                         selected?.let { id ->
                             val editor: NoteEditorViewModel = viewModel(key = "note-$id-$generation") { NoteEditorViewModel(container, createSavedStateHandle(), id) }
-                            NoteEditorScreen(editor, onClose = { selected = null }, showBack = false)
+                            NoteEditorScreen(editor, onClose = { selected = null }, showBack = false,
+                                onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) })
                         } ?: com.alondra1.app.ui.EmptyState(Icons.Outlined.StickyNote2, "No note selected", "Choose a note or start a new one.")
                     }
                 }
@@ -274,7 +275,7 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
             deepLinks = listOf(navDeepLink { uriPattern = "alondra1://note/{id}" })) { entry ->
             val id = entry.arguments?.getString("id") ?: NEW_NOTE
             val vm: NoteEditorViewModel = viewModel { NoteEditorViewModel(container, createSavedStateHandle(), id) }
-            NoteEditorScreen(vm, onClose = { nav.popBackStack() })
+            NoteEditorScreen(vm, onClose = { nav.popBackStack() }, onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) })
         }
         composable(Routes.CALENDAR) {
             val vm: CalendarViewModel = viewModel { CalendarViewModel(container) }

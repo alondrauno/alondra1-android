@@ -13,15 +13,16 @@ Rich-text notes, compatible with the Windows app.
   - New tables: `note_folders`, `note_assets` and the FTS4 index `notes_fts`.
   - `MIGRATION_2_3` keeps every existing note; plain-text notes open as paragraphs.
 - **Pictures.**
-  - Accepted: PNG, JPEG, GIF and WebP, checked from their bytes; up to 20 MB each.
+  - Accepted: PNG, JPEG, GIF and WebP, checked from their bytes; up to 20 MB each and 100 MB per note.
   - Each picture is stored once by its SHA-256, the same id the Windows app and the server use.
   - Sources: the system photo picker, paste, or Android's share sheet. Sharing text or pictures to Alondra1 creates a note.
 - **Saving.** The editor reports changes about 0.45 s after typing stops. Leaving the note, the back button and the app going to the background save immediately.
-- **Trash.** Notes in Trash are deleted for good after 30 days, checked at start.
+- **Trash.** Notes in Trash are deleted for good after 30 days, checked at start. Deleting a note or emptying Trash asks first.
 - **Sync.**
   - `note_folder` and `note` sync with Cloud Sync.
   - Pictures are uploaded before their note and downloaded after a pull.
   - Edits made on two devices keep both versions as a **(conflict copy)**.
+- **Links.** Tapping a linked task or event chip (or a task link in the text) opens it.
 - **Fallback.** Without a working system WebView, notes use the plain-text editor, and notes with formatting open read-only so nothing is lost.
 
 Not on Android yet:
@@ -34,4 +35,4 @@ Not on Android yet:
 ## Tests
 
 - `RichNotesTest` and `MigrationTest` (JVM).
-- `DialogFlowsTest` (on a device or emulator) opens a Windows-format document in the real editor and checks it saves unchanged, and turns a checklist item into a task.
+- `DialogFlowsTest` (on a device or emulator) opens a Windows-format document in the real editor and checks it saves unchanged, and turns a checklist item into a task, opens linked tasks and events, and checks that permanent deletion asks first.

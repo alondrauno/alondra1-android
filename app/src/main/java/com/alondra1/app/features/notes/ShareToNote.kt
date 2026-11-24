@@ -26,7 +26,7 @@ object ShareToNote {
         for (uri in uris.take(20)) {
             val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() ?: continue
             try {
-                val asset = container.noteAssets.add(bytes)
+                val asset = container.noteAssets.add(bytes, assets)
                 assets += asset.sha256
                 nodes += """{"type":"image","attrs":{"assetId":"${asset.sha256}"${if ((asset.width ?: 0) > 600) ",\"width\":600" else ""}}}"""
             } catch (e: NoteAssetException) {

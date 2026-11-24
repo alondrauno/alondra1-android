@@ -118,6 +118,13 @@ class RichNotesTest {
         assertEquals(asset.sha256, c.noteAssets.add(png).sha256)
         try { c.noteAssets.add("<script>".toByteArray()); fail() } catch (e: NoteAssetException) { assertTrue(e.message!!.contains("PNG")) }
         assertFalse(c.noteAssets.addDownloaded("0".repeat(64), png))
+
+        // Per-note total: a picture already in the note never counts twice; a new one may not exceed the limit.
+        val perNote = NoteAssets(c.db, c.noteAssets.directory, time, maxBytesPerNote = png.size + 10L)
+        val other = png + ByteArray(20)
+        assertEquals(asset.sha256, perNote.add(png, listOf(asset.sha256)).sha256)
+        try { perNote.add(other, listOf(asset.sha256)); fail() } catch (e: NoteAssetException) { assertTrue(e.message!!.contains("one note")) }
+        assertEquals("image/png", perNote.add(png + ByteArray(5), emptyList()).mimeType)
     }
 
     @Test fun wireFormatCarriesEveryRichFieldAndKeepsUnknownServerFields() = runBlocking<Unit> {
