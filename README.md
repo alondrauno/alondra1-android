@@ -2,9 +2,9 @@
 
 # Alondra1 for Android
 
-[![ci](https://github.com/nikita4sea/alondra1-android/actions/workflows/ci.yml/badge.svg)](https://github.com/nikita4sea/alondra1-android/actions/workflows/ci.yml)
+[![ci](https://github.com/alondrauno/alondra1-android/actions/workflows/ci.yml/badge.svg)](https://github.com/alondrauno/alondra1-android/actions/workflows/ci.yml)
 
-Personal **To-do**, **Notes** and **Calendar** for Android phones and tablets. Local-first: everything works offline, with no account, and stays on the device. Optional paid **Cloud Sync** uses the Alondra1 backend ([alondra1-backend](https://github.com/nikita4sea/alondra1-backend)); see [Cloud account and sync](#cloud-account-and-sync).
+Personal **To-do**, **Notes** and **Calendar** for Android phones and tablets. Local-first: everything works offline, with no account, and stays on the device. Optional paid **Cloud Sync** uses the Alondra1 backend ([alondra1-backend](https://github.com/alondrauno/alondra1-backend)); see [Cloud account and sync](#cloud-account-and-sync).
 
 Phase 1 scope and rules: [docs/CLIENT-REQUIREMENTS.md](docs/CLIENT-REQUIREMENTS.md). Every feature with its code, tests and status: [docs/FEATURE-MAP.md](docs/FEATURE-MAP.md). Not in this app: Mail, Contacts, task attachments (kept unchanged when synced), recurring events, system-calendar access. Task steps, repeats, start dates, several reminders, list groups and completion history work as on Windows (completion spec v1.1 §8.3).
 
@@ -45,7 +45,7 @@ Kotlin, Jetpack Compose with Material 3, single activity, Navigation Compose, MV
 
 ## To-do rules
 
-Same semantics as the Windows app ([shared task contract](https://github.com/nikita4sea/alondra1-backend/tree/main/contract)):
+Same semantics as the Windows app ([shared task contract](https://github.com/alondrauno/alondra1-backend/tree/main/contract)):
 
 - **My Day** contains tasks whose My Day date is today. It's explicit: tasks are added from quick add in My Day, from the task detail, or from Windows, and the view starts empty each day. Tasks due today are not added automatically.
 - **Important:** open and starred. **Planned:** open with a due date. **Upcoming:** open and due after today. **Unscheduled:** open without a due date.

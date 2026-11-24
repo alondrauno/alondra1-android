@@ -3,7 +3,7 @@
 A complete, structured list of what the Android app does: high-level **capabilities**, the **features** inside each, and every **atomic feature** (one behavior you can test). Each feature names the code that implements it, the tests that cover it and the document that explains it. Use it to plan and add a feature **without scanning the code**: find the closest existing feature, follow its pointers, and use the [recipes](#recipes-adding-a-feature) at the end.
 
 - User-facing description: [README](../README.md), [NOTES.md](NOTES.md), [CLOUD.md](CLOUD.md). Scope rules: [CLIENT-REQUIREMENTS.md](CLIENT-REQUIREMENTS.md).
-- The same capabilities on Windows and in the backend: [alondra1-windows FEATURE-MAP](https://github.com/nikita4sea/alondra1-windows/blob/main/docs/FEATURE-MAP.md) and [alondra1-backend FEATURE-MAP](https://github.com/nikita4sea/alondra1-backend/blob/main/docs/FEATURE-MAP.md) (cross-platform parity table). IDs for shared features match the Windows map (`TODO-…`, `NOTE-…`, `SYNC-…`).
+- The same capabilities on Windows and in the backend: [alondra1-windows FEATURE-MAP](https://github.com/alondrauno/alondra1-windows/blob/main/docs/FEATURE-MAP.md) and [alondra1-backend FEATURE-MAP](https://github.com/alondrauno/alondra1-backend/blob/main/docs/FEATURE-MAP.md) (cross-platform parity table). IDs for shared features match the Windows map (`TODO-…`, `NOTE-…`, `SYNC-…`).
 - Keep this file current: a change that adds, removes or changes a user-visible behavior updates its row here in the same commit.
 
 **Status:** **Done**: implemented and tested. **Partial**: works with a stated limit. **Gap**: known missing piece.
