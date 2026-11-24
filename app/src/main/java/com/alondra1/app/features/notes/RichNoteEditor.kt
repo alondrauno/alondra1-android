@@ -22,7 +22,7 @@ import kotlinx.serialization.json.jsonObject
 import java.io.ByteArrayInputStream
 
 /**
- * Hosts the Alondra1 Notes editor (assets/notes-editor, built from alondra1-notes-editor: the same bundle as the
+ * Hosts the Alondra1 Notes editor (assets/notes-editor, built from alondra1-backend contract/notes-editor: the same bundle as the
  * Windows app, so documents round-trip exactly). The page is served from the APK at https://editor.alondra1.invalid
  * and pictures from files/notes-assets at https://assets.alondra1.invalid; nothing else can load or navigate.
  */

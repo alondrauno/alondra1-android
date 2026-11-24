@@ -57,7 +57,7 @@ data class TaskEntity(
 )
 
 /**
- * A note. [docJson] is the shared rich-text document (note-document-v1, edited by alondra1-notes-editor); [body] is
+ * A note. [docJson] is the shared rich-text document (note-document-v1, edited by the shared notes editor in alondra1-backend contract/notes-editor); [body] is
  * its plain text for search, previews and older clients. [trashedUtc] = in Trash (restorable); [deletedUtc] = gone
  * for good (a tombstone kept for sync).
  */

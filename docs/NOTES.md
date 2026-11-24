@@ -2,7 +2,7 @@
 
 Rich-text notes, compatible with the Windows app.
 
-- **Editor.** The shared [alondra1-notes-editor](../../alondra1-notes-editor) bundle runs in the system WebView:
+- **Editor.** The shared [notes editor](https://github.com/nikita4sea/alondra1-backend/tree/main/contract/notes-editor) (alondra1-backend `contract/notes-editor`) bundle runs in the system WebView:
   - it is served from `assets/notes-editor` through `WebViewAssetLoader`;
   - pictures come from `files/notes-assets`;
   - every other request and every navigation is blocked.
