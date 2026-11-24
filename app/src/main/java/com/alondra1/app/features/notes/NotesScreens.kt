@@ -437,6 +437,9 @@ class NoteEditorViewModel(private val container: AppContainer, private val handl
 
     val assets get() = container.noteAssets
 
+    /** The unresolved sync conflict this note is part of (as the note or its conflict copy), or null. */
+    val conflict = container.db.sync().observeNoteConflict(noteId)
+
     init {
         viewModelScope.launch {
             val stored = container.notes.getNote(noteId)?.takeIf { it.deletedUtc == null }
@@ -553,16 +556,17 @@ class NoteEditorViewModel(private val container: AppContainer, private val handl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NoteEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean = true, onOpenTask: (String) -> Unit = {}, onOpenEvent: (String) -> Unit = {}) {
+fun NoteEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean = true, onOpenTask: (String) -> Unit = {}, onOpenEvent: (String) -> Unit = {},
+                     onCompare: (Long) -> Unit = {}) {
     val context = LocalContext.current
     val rich = remember { NoteEditorBridge.available(context) }
     if (!viewModel.loaded) return
-    if (rich) RichEditorScreen(viewModel, onClose, showBack, onOpenTask, onOpenEvent) else PlainEditorScreen(viewModel, onClose, showBack)
+    if (rich) RichEditorScreen(viewModel, onClose, showBack, onOpenTask, onOpenEvent, onCompare) else PlainEditorScreen(viewModel, onClose, showBack, onCompare)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean, onOpenTask: (String) -> Unit, onOpenEvent: (String) -> Unit) {
+private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean, onOpenTask: (String) -> Unit, onOpenEvent: (String) -> Unit, onCompare: (Long) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbar.current
@@ -666,6 +670,8 @@ private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit
                 }
             },
         )
+        val conflict by viewModel.conflict.collectAsStateWithLifecycle(initialValue = null)
+        conflict?.let { issue -> ConflictBanner { scope.launch(Dispatchers.Main) { flushNow(); withContext(Dispatchers.Main) { onCompare(issue.id) } } } }
         if (viewModel.links.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 viewModel.links.forEach { link ->
@@ -745,7 +751,7 @@ private fun LinkPickerDialog(viewModel: NoteEditorViewModel, onDismiss: () -> Un
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlainEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean) {
+private fun PlainEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit, showBack: Boolean, onCompare: (Long) -> Unit) {
     val snackbar = LocalSnackbar.current
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
@@ -790,6 +796,8 @@ private fun PlainEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Uni
                 }
             },
         )
+        val conflict by viewModel.conflict.collectAsStateWithLifecycle(initialValue = null)
+        conflict?.let { issue -> ConflictBanner { viewModel.flush(); onCompare(issue.id) } }
         if (readOnly) Text("This note has formatting that needs the full editor, which is not available on this device. It is shown as text and kept unchanged.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
         TextField(

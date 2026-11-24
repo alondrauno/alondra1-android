@@ -8,6 +8,9 @@ import com.alondra1.app.data.local.NoteFolderEntity
 import com.alondra1.app.data.local.NoteSummary
 import com.alondra1.app.data.sync.ChangeRecorder
 import com.alondra1.app.data.sync.EntityType
+import com.alondra1.app.domain.MeetingNotes
+import com.alondra1.app.domain.NoteConflictChoice
+import com.alondra1.app.domain.NoteMerge
 import com.alondra1.app.domain.NoteRules
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
@@ -15,6 +18,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.time.Duration
 
 class NoteStorageException(message: String) : Exception(message)
@@ -157,6 +161,58 @@ class NotesRepository(
         val old = notes.trashedBefore(time.now().minus(retention))
         old.forEach { delete(it.id) }
         return old.size
+    }
+
+    // ------------------------------------------------------------------------------------------------- conflicts
+
+    /**
+     * Resolves a sync conflict between a note (the other device's version, under the original id) and its conflict
+     * copy (this device's version). The original id keeps the result so every device converges; the conflict copy goes
+     * to Trash, where it can still be restored. Returns the id of the note to show afterwards.
+     */
+    suspend fun resolveConflict(originalId: String, copyId: String, choice: NoteConflictChoice): String? {
+        val copy = notes.get(copyId)?.takeIf { it.deletedUtc == null }
+        val original = notes.get(originalId)?.takeIf { it.deletedUtc == null }
+        when (choice) {
+            NoteConflictChoice.KEEP_BOTH -> return copy?.id ?: original?.id
+            NoteConflictChoice.KEEP_OTHER -> { if (copy != null) trash(listOf(copy.id)); return original?.id }
+            else -> Unit
+        }
+        if (copy == null) return original?.id
+        if (original == null) {
+            // The other device deleted the note: this device's version stays, under its own title again.
+            edit(listOf(copy.id)) { it.copy(title = NoteMerge.originalTitle(it.title)) }
+            return copy.id
+        }
+        val now = time.now()
+        val resolved = if (choice == NoteConflictChoice.KEEP_MINE) {
+            original.copy(title = NoteMerge.originalTitle(copy.title), body = copy.body, docJson = copy.docJson, assetsJson = copy.assetsJson,
+                linksJson = copy.linksJson, modifiedUtc = now)
+        } else {
+            val parse = { t: String? -> t?.let { runCatching { json.parseToJsonElement(it) as? JsonObject }.getOrNull() } }
+            val doc = NoteMerge.combineDocuments(parse(original.docJson), original.body, parse(copy.docJson), copy.body).toString()
+            if (doc.toByteArray().size > MAX_DOCUMENT_BYTES) throw NoteStorageException("Both versions together are over 2 MB of text and tables. Keep one version, or keep both as separate notes.")
+            val links = decodeLinks(original.linksJson).let { mine -> mine + decodeLinks(copy.linksJson).filter { l -> mine.none { it.type == l.type && it.id == l.id } } }
+            original.copy(docJson = doc, body = NoteMerge.combineText(original.body, copy.body).take(200_000),
+                assetsJson = encodeIds((decodeIds(original.assetsJson) + decodeIds(copy.assetsJson)).distinct()),
+                linksJson = encodeLinks(links.take(50)), modifiedUtc = now)
+        }
+        db.runInTransactionSuspend {
+            write(resolved)
+            write(copy.copy(trashedUtc = now, modifiedUtc = now))
+        }
+        return original.id
+    }
+
+    /** The first note (not in Trash) linking to the object, e.g. an event's meeting notes. */
+    suspend fun findLinked(type: String, id: String): NoteEntity? =
+        notes.linkingTo(id).firstOrNull { n -> decodeLinks(n.linksJson).any { it.type == type && it.id == id } }
+
+    /** An event's meeting notes: the note linked to it, or a new one from the meeting template. Returns its id. */
+    suspend fun meetingNotes(eventId: String, subject: String, `when`: String, description: String?): String {
+        findLinked(NoteLink.EVENT, eventId)?.let { return it.id }
+        val (doc, text) = MeetingNotes.document(`when`, description)
+        return create(title = MeetingNotes.title(subject), docJson = doc.toString(), text = text, links = listOf(NoteLink(NoteLink.EVENT, eventId, subject.ifBlank { null }))).id
     }
 
     // ------------------------------------------------------------------------------------------------- folders

@@ -100,6 +100,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -466,11 +467,22 @@ class EventEditorViewModel(private val container: AppContainer, requestedId: Str
 
     suspend fun delete(): EventEntity? = container.calendar.delete(id)
     suspend fun restore(e: EventEntity) = container.calendar.restore(e)
+
+    /** Date and time as written at the top of the meeting notes. */
+    fun meetingWhen(locale: Locale = Locale.getDefault()): String {
+        val day = java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", locale)
+        val hm = java.time.format.DateTimeFormatter.ofPattern("HH:mm", locale)
+        return if (allDay) startDate.format(day) + (if (endDate != startDate) " – " + endDate.format(day) else "") + " · All day"
+        else startDate.format(day) + " · " + startTime.format(hm) + "–" + (if (endDate != startDate) endDate.format(day) + " " else "") + endTime.format(hm)
+    }
+
+    /** Notes spec §11: the event's meeting notes (the linked note, or a new one from the meeting template). Returns the note id. */
+    suspend fun meetingNotes(): String = container.notes.meetingNotes(id, title, meetingWhen(), description)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EventEditorScreen(viewModel: EventEditorViewModel, onClose: () -> Unit) {
+fun EventEditorScreen(viewModel: EventEditorViewModel, onClose: () -> Unit, onMeetingNotes: (String) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbar.current
     val is24 = is24Hour()
@@ -493,6 +505,12 @@ fun EventEditorScreen(viewModel: EventEditorViewModel, onClose: () -> Unit) {
             OutlinedTextField(value = viewModel.title, onValueChange = { viewModel.title = it.take(500); viewModel.error = null }, label = { Text("Title") },
                 singleLine = true, keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth().testTag("eventTitle"))
+            if (!viewModel.isNew) {
+                OutlinedButton(onClick = { scope.launch(Dispatchers.Main) { val note = viewModel.meetingNotes(); withContext(Dispatchers.Main) { onMeetingNotes(note) } } }, modifier = Modifier.testTag("meetingNotes")) {
+                    Icon(Icons.Outlined.EventNote, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                    Text("Meeting notes")
+                }
+            }
             Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
                 Column {
                     ListItem(headlineContent = { Text("All day") }, trailingContent = {

@@ -147,6 +147,30 @@ class SyncEngineTest {
         assertEquals(0, c.db.sync().outbox().size)
     }
 
+    private fun noteRecord(id: String, version: Long, body: String) =
+        """{"resource_type":"note","action":"upsert","resource_id":"$id","record":{"id":"$id","version":$version,"schema_version":1,"updated_at":"2026-11-20T00:00:00Z","note":{"id":"$id","title":"Shared","body":"$body","createdUtc":"2026-11-01T00:00:00Z","modifiedUtc":"2026-11-01T00:00:00Z"}}}"""
+
+    @Test fun aNoteConflictRemembersItsCopySoTheUserCanCombineBoth() = runBlocking<Unit> {
+        bootstrapItems = "[${listRecord("d", 1, true)},${noteRecord("n1", 2, "first line")}]"
+        engine.enable(tenant)
+        c.notes.save("n1", "Shared", "first line\nedited on the phone")
+        pushResponder = { req ->
+            val m = req["mutations"]!!.jsonArray.first().jsonObject
+            pushResponder = { appliedAll(it) }
+            json("""{"results":[{"mutation_id":"${m["mutation_id"]!!.jsonPrimitive.content}","status":"conflict","code":"VERSION_CONFLICT",
+                "current":${noteRecord("n1", 3, "first line\\nedited on Windows").let { WireMapper.json.parseToJsonElement(it).jsonObject["record"] }}}]}""")
+        }
+        engine.syncNow()
+        val copy = c.db.notes().all().single { it.title == "Shared (conflict copy)" }
+        val issue = c.db.sync().observeIssuesOnce().single()
+        assertEquals("n1" to copy.id, issue.entityId to issue.copyId)
+        assertEquals(issue, c.db.sync().observeNoteConflict(copy.id).first())
+
+        assertEquals("n1", c.notes.resolveConflict("n1", copy.id, com.alondra1.app.domain.NoteConflictChoice.COMBINE))
+        assertEquals("first line\nedited on Windows\nedited on the phone", c.db.notes().get("n1")!!.body)
+        assertNotNull(c.db.notes().get(copy.id)!!.trashedUtc)
+    }
+
     @Test fun aPullNeverOverwritesUnsentEdits() = runBlocking<Unit> {
         bootstrapItems = "[${listRecord("d", 1, true)},${taskRecord("t1", 1, "Original", "d")}]"
         engine.enable(tenant)

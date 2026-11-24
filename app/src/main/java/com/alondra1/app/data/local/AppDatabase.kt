@@ -13,7 +13,7 @@ import androidx.room.TypeConverters
 @Database(
     entities = [TaskListEntity::class, TaskEntity::class, NoteEntity::class, EventEntity::class, OutboxEntity::class, SyncIssueEntity::class,
         NoteFts::class, NoteFolderEntity::class, NoteAssetEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -68,7 +68,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3)
+        /** 3 -> 4: a note's sync conflict remembers its conflict copy, so both versions can be compared and resolved. */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sync_issues` ADD COLUMN `copyId` TEXT")
+            }
+        }
+
+        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         fun build(context: Context, name: String? = NAME): AppDatabase {
             val builder = if (name == null) {

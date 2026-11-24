@@ -46,6 +46,7 @@ fun CloudAccountSection(container: AppContainer) {
     val pending by remember { container.db.sync().observePending() }.collectAsStateWithLifecycle(initialValue = 0)
     val issues by remember { container.db.sync().observeIssues() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = rememberCoroutineScope()
+    val openConflict = com.alondra1.app.features.notes.LocalOpenNoteConflict.current
     var signingIn by rememberSaveable { mutableStateOf(false) }
     var plan by remember { mutableStateOf<Entitlements?>(null) }
     var planError by remember { mutableStateOf<String?>(null) }
@@ -137,7 +138,13 @@ fun CloudAccountSection(container: AppContainer) {
                 ListItem(
                     headlineContent = { Text(issue.title) },
                     supportingContent = { Text(issue.message) },
-                    trailingContent = { TextButton(onClick = { scope.launch { container.db.sync().dismissIssue(issue.id) } }) { Text("OK") } },
+                    trailingContent = {
+                        androidx.compose.foundation.layout.Row {
+                            // A note conflict: compare both versions and choose (Notes spec 10.2).
+                            if (issue.copyId != null) TextButton(onClick = { openConflict(issue.id) }, modifier = Modifier.testTag("compareIssue")) { Text("Compare") }
+                            TextButton(onClick = { scope.launch { container.db.sync().dismissIssue(issue.id) } }) { Text("OK") }
+                        }
+                    },
                     modifier = Modifier.testTag("syncIssue"),
                 )
             }

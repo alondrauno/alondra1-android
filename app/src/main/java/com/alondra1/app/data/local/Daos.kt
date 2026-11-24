@@ -120,6 +120,10 @@ interface NoteDao {
     @Query("SELECT notes.id FROM notes JOIN notes_fts ON notes.rowid = notes_fts.rowid WHERE notes_fts MATCH :match AND notes.deletedUtc IS NULL LIMIT :limit")
     suspend fun searchIds(match: String, limit: Int): List<String>
 
+    /** Candidates for notes linking to [id] (the caller checks the decoded links). */
+    @Query("SELECT * FROM notes WHERE deletedUtc IS NULL AND trashedUtc IS NULL AND linksJson LIKE '%' || :id || '%' ORDER BY modifiedUtc DESC")
+    suspend fun linkingTo(id: String): List<NoteEntity>
+
     @Query("SELECT * FROM notes WHERE deletedUtc IS NULL AND trashedUtc IS NOT NULL AND trashedUtc < :before")
     suspend fun trashedBefore(before: java.time.Instant): List<NoteEntity>
 

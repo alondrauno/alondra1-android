@@ -57,4 +57,18 @@ class MigrationTest {
         assertEquals(listOf("n1"), db.notes().searchIds(com.alondra1.app.data.repository.NotesRepository.ftsQuery("charg")!!, 10))
         db.close()
     }
+
+    @Test fun version3To4LetsSyncIssuesRememberAConflictCopy() = runBlocking<Unit> {
+        val name = "migration-3-4.db"
+        helper.createDatabase(name, 3).apply {
+            execSQL("INSERT INTO sync_issues (entityType, entityId, title, message, createdUtc) VALUES ('task', 't1', 'Old', 'Kept', 1)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 4, true, *AppDatabase.MIGRATIONS)
+        val db = Room.databaseBuilder(TestSupport.context(), AppDatabase::class.java, name).addMigrations(*AppDatabase.MIGRATIONS).allowMainThreadQueries().build()
+        val old = db.sync().issue(1)!!
+        assertEquals("Old", old.title)
+        assertEquals(null, old.copyId)
+        db.close()
+    }
 }

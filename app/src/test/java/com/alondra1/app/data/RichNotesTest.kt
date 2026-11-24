@@ -12,11 +12,18 @@ import com.alondra1.app.data.repository.NoteStorageException
 import com.alondra1.app.data.repository.NoteView
 import com.alondra1.app.data.repository.NotesRepository
 import com.alondra1.app.data.sync.WireMapper
+import com.alondra1.app.domain.DiffSide
+import com.alondra1.app.domain.MeetingNotes
+import com.alondra1.app.domain.NoteConflictChoice
+import com.alondra1.app.domain.NoteMerge
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -143,5 +150,77 @@ class RichNotesTest {
         val withExtra = WireMapper.json.parseToJsonElement(wire.toString().dropLast(1) + ""","futureField":42}""").jsonObject
         val local = WireMapper.noteFrom(withExtra, 4).copy(title = "Edited")
         assertEquals("42", WireMapper.note(local)["futureField"].toString())
+    }
+
+    // ---------------------------------------------------------------- conflicts and meeting notes (same rules as Windows)
+
+    private fun paragraphs(vararg lines: String) = NoteMerge.paragraphDocument(lines.joinToString("\n"))
+
+    @Test fun combiningKeepsEveryBlockOnceAndDifferencesFromBothSides() {
+        val texts = NoteMerge.combineDocuments(paragraphs("Title", "phone line", "Shared end"), "", paragraphs("Title", "PC line", "Shared end", "PC tail"), "")["content"]!!
+            .jsonArray.map { it.jsonObject["content"]?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content }
+        assertEquals(listOf("Title", "phone line", "PC line", "Shared end", "PC tail"), texts)
+        assertEquals(listOf(DiffSide.BOTH, DiffSide.ONLY_OTHER, DiffSide.ONLY_MINE, DiffSide.BOTH), NoteMerge.diffLines("a\nb\nc", "a\nB\nc").map { it.side })
+        assertEquals("a\nb\nB\nc", NoteMerge.combineText("a\nb\nc", "a\nB\nc"))
+        val future = kotlinx.serialization.json.JsonObject(paragraphs("x") + ("schemaVersion" to kotlinx.serialization.json.JsonPrimitive(2)))
+        val plain = NoteMerge.combineDocuments(null, "old text", future, "")
+        assertEquals("2", plain["schemaVersion"].toString())
+        assertEquals(2, plain["content"]!!.jsonArray.size)
+        assertEquals("Shared", NoteMerge.originalTitle("Shared (conflict copy)"))
+    }
+
+    @Test fun resolvingAConflictKeepsTheChosenVersion() = runBlocking<Unit> {
+        val picture = "b".repeat(64)
+        suspend fun pair(): Pair<String, String> {
+            val original = c.notes.create("Plan", docJson = paragraphs("theirs").toString(), text = "theirs", links = listOf(NoteLink(NoteLink.TASK, "t1")))
+            val copy = c.notes.create("Plan (conflict copy)", docJson = paragraphs("mine").toString(), text = "mine", links = listOf(NoteLink(NoteLink.EVENT, "e1")), assets = listOf(picture))
+            return original.id to copy.id
+        }
+
+        val (o1, c1) = pair()
+        assertEquals(o1, c.notes.resolveConflict(o1, c1, NoteConflictChoice.KEEP_OTHER))
+        assertEquals("theirs", c.notes.getNote(o1)!!.body)
+        assertNotNull(c.notes.getNote(c1)!!.trashedUtc)
+
+        val (o2, c2) = pair()
+        c.notes.resolveConflict(o2, c2, NoteConflictChoice.KEEP_MINE)
+        val kept = c.notes.getNote(o2)!!
+        assertEquals("Plan" to "mine", kept.title to kept.body)
+        assertEquals(listOf(picture), NotesRepository.decodeIds(kept.assetsJson))
+        assertEquals(listOf("e1"), NotesRepository.decodeLinks(kept.linksJson).map { it.id })
+        assertNotNull(c.notes.getNote(c2)!!.trashedUtc)
+
+        val (o3, c3) = pair()
+        c.notes.resolveConflict(o3, c3, NoteConflictChoice.COMBINE)
+        val both = c.notes.getNote(o3)!!
+        assertEquals("theirs\nmine", both.body)
+        assertEquals(listOf("t1", "e1"), NotesRepository.decodeLinks(both.linksJson).map { it.id })
+        assertTrue(both.docJson!!.contains("theirs") && both.docJson!!.contains("mine"))
+
+        val (o4, c4) = pair()
+        assertEquals(c4, c.notes.resolveConflict(o4, c4, NoteConflictChoice.KEEP_BOTH))
+        assertNull(c.notes.getNote(c4)!!.trashedUtc)
+
+        // Deleted on the other device: keeping mine gives the copy its title back.
+        val (o5, c5) = pair()
+        c.notes.delete(o5)
+        assertEquals(c5, c.notes.resolveConflict(o5, c5, NoteConflictChoice.KEEP_MINE))
+        assertEquals("Plan", c.notes.getNote(c5)!!.title)
+    }
+
+    @Test fun meetingNotesAreCreatedOncePerEventAndLinkedToIt() = runBlocking<Unit> {
+        val (doc, text) = MeetingNotes.document("Tuesday, 24 November 2026 · 10:00–11:00", "Room 4\n\nBring the plan")
+        assertEquals(listOf("paragraph", "paragraph", "paragraph", "heading", "bulletList", "heading", "paragraph", "heading", "taskList"),
+            doc["content"]!!.jsonArray.map { it.jsonObject["type"]!!.jsonPrimitive.content })
+        assertTrue(text.startsWith("Tuesday, 24 November 2026 · 10:00–11:00\nRoom 4\nBring the plan\nAgenda"))
+
+        val id = c.notes.meetingNotes("evt-9", "Design review", "Tuesday", null)
+        val note = c.notes.getNote(id)!!
+        assertEquals("Design review – meeting notes", note.title)
+        assertEquals(listOf(NoteLink(NoteLink.EVENT, "evt-9", "Design review")), NotesRepository.decodeLinks(note.linksJson))
+        assertEquals("the same event opens the same note", id, c.notes.meetingNotes("evt-9", "Design review", "Tuesday", null))
+        assertNull(c.notes.findLinked(NoteLink.EVENT, "evt-other"))
+        c.notes.trash(listOf(id))
+        assertNotEquals("a note in Trash is not reused", id, c.notes.meetingNotes("evt-9", "Design review", "Tuesday", null))
     }
 }

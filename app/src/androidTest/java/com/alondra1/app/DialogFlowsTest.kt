@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alondra1.app.data.repository.NotesRepository
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -157,6 +158,56 @@ class DialogFlowsTest {
         rule.waitUntilAtLeastOneExists(hasTestTag("link:task:${task.id}"), 10_000)
         rule.onNodeWithTag("link:task:${task.id}").performClick()
         rule.waitUntilAtLeastOneExists(hasText("Book the venue"), 10_000)
+    }
+
+    @Test fun aSyncConflictIsComparedAndCombinedIntoTheNote() {
+        val other = """{"schemaVersion":1,"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Shared start"}]},{"type":"paragraph","content":[{"type":"text","text":"From Windows"}]}]}"""
+        val mine = """{"schemaVersion":1,"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Shared start"}]},{"type":"paragraph","content":[{"type":"text","text":"From the phone"}]}]}"""
+        runBlocking {
+            container.notes.saveContent("n5", "Trip", other, "Shared start\nFrom Windows", emptyList())
+            container.notes.saveContent("n5c", "Trip (conflict copy)", mine, "Shared start\nFrom the phone", emptyList())
+            container.db.sync().addIssue(com.alondra1.app.data.local.SyncIssueEntity(entityType = "note", entityId = "n5", title = "Trip",
+                message = "It was changed on another device too.", createdUtc = 0, copyId = "n5c"))
+        }
+        openNote("Trip")
+        rule.waitUntilAtLeastOneExists(hasTestTag("compareVersions"), 10_000)
+        rule.onNodeWithTag("compareVersions").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("version:other"), 10_000)
+        rule.onNodeWithText("From Windows").assertExists()
+        rule.onNodeWithText("From the phone").assertExists()
+        rule.onNodeWithTag("conflict:combine").performClick()
+        rule.waitUntil(10_000) { runBlocking { container.notes.getNote("n5c")!!.trashedUtc } != null }
+        val combined = runBlocking { container.notes.getNote("n5")!!.docJson!! }
+        assertTrue(combined.contains("From Windows") && combined.contains("From the phone"))
+        assertEquals(1, Regex("Shared start").findAll(combined).count())
+        assertTrue(runBlocking { container.db.sync().observeIssues().first() }.none { it.copyId == "n5c" })
+        // The combined note opens in the editor, without the conflict banner.
+        val web = webView()
+        rule.waitUntil(20_000) { flushed(web)?.toString()?.contains("From the phone") == true }
+        assertEquals(0, rule.onAllNodes(hasTestTag("conflictBanner")).fetchSemanticsNodes().size)
+    }
+
+    @Test fun meetingNotesStartFromACalendarEventAndReopenTheSameNote() {
+        val now = java.time.Instant.now()
+        val event = runBlocking { container.calendar.save(EventEntity(id = "", title = "Planning", description = "Room 4", allDay = true,
+            startDate = java.time.LocalDate.now(), endDate = java.time.LocalDate.now(), timeZoneId = "UTC", createdUtc = now, modifiedUtc = now)) }
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab:Calendar"), 10_000)
+        rule.onNodeWithTag("tab:Calendar").performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Planning"), 10_000)
+        rule.onAllNodes(hasText("Planning"))[0].performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("meetingNotes"), 10_000)
+        rule.onNodeWithTag("meetingNotes").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("richEditor"), 10_000)
+        val note = runBlocking { container.notes.findLinked(NoteLink.EVENT, event.id) }!!
+        assertEquals("Planning – meeting notes", note.title)
+        val web = webView()
+        rule.waitUntil(20_000) { flushed(web)?.toString()?.let { it.contains("Action items") && it.contains("Room 4") } == true }
+        // Back to the event: Meeting notes opens the same note again.
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { rule.activity.onBackPressedDispatcher.onBackPressed() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("meetingNotes"), 10_000)
+        rule.onNodeWithTag("meetingNotes").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("richEditor"), 10_000)
+        assertEquals(1, runBlocking { container.notes.observeNotes().first() }.count { it.title == "Planning – meeting notes" })
     }
 
     @Test fun deletingANoteFromTrashAsksFirst() {

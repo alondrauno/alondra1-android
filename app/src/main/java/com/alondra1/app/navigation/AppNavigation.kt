@@ -97,6 +97,8 @@ object Routes {
     const val NEW_EVENT = "event-new?date={date}"
     const val SEARCH = "search"
     const val SETTINGS = "settings"
+    const val NOTE_CONFLICT = "note-conflict/{issue}"
+    fun noteConflict(issueId: Long) = "note-conflict/$issueId"
     fun task(id: String) = "task/$id"
     fun note(id: String) = "note/$id"
     fun event(id: String) = "event/$id"
@@ -220,6 +222,7 @@ private fun belongsTo(route: String): Tab? = when {
 
 @Composable
 private fun AppNavHost(nav: NavHostController, container: AppContainer, start: String, twoPane: Boolean, accountSection: @Composable () -> Unit) {
+    CompositionLocalProvider(com.alondra1.app.features.notes.LocalOpenNoteConflict provides { nav.navigate(Routes.noteConflict(it)) }) {
     NavHost(navController = nav, startDestination = start) {
         composable(Routes.TODO) {
             val vm: TodoViewModel = viewModel { TodoViewModel(container, TodoSelection.View(SmartView.MY_DAY)) }
@@ -263,7 +266,9 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
                         selected?.let { id ->
                             val editor: NoteEditorViewModel = viewModel(key = "note-$id-$generation") { NoteEditorViewModel(container, createSavedStateHandle(), id) }
                             NoteEditorScreen(editor, onClose = { selected = null }, showBack = false,
-                                onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) })
+                                onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) },
+                                // Close the pane first so it cannot show (or save) the version from before the choice.
+                                onCompare = { selected = null; nav.navigate(Routes.noteConflict(it)) })
                         } ?: com.alondra1.app.ui.EmptyState(Icons.Outlined.StickyNote2, "No note selected", "Choose a note or start a new one.")
                     }
                 }
@@ -275,7 +280,8 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
             deepLinks = listOf(navDeepLink { uriPattern = "alondra1://note/{id}" })) { entry ->
             val id = entry.arguments?.getString("id") ?: NEW_NOTE
             val vm: NoteEditorViewModel = viewModel { NoteEditorViewModel(container, createSavedStateHandle(), id) }
-            NoteEditorScreen(vm, onClose = { nav.popBackStack() }, onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) })
+            NoteEditorScreen(vm, onClose = { nav.popBackStack() }, onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) },
+                onCompare = { nav.navigate(Routes.noteConflict(it)) })
         }
         composable(Routes.CALENDAR) {
             val vm: CalendarViewModel = viewModel { CalendarViewModel(container) }
@@ -292,7 +298,7 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
             deepLinks = listOf(navDeepLink { uriPattern = "alondra1://event/{id}" })) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val vm: EventEditorViewModel = viewModel { EventEditorViewModel(container, id, null) }
-            EventEditorScreen(vm, onClose = { nav.popBackStack() })
+            EventEditorScreen(vm, onClose = { nav.popBackStack() }, onMeetingNotes = { nav.navigate(Routes.note(it)) })
         }
         composable(Routes.NEW_EVENT, arguments = listOf(navArgument("date") { type = NavType.StringType; nullable = true })) { entry ->
             val date = entry.arguments?.getString("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
@@ -307,5 +313,15 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { nav.popBackStack() }, accountSection = accountSection)
         }
+        composable(Routes.NOTE_CONFLICT, arguments = listOf(navArgument("issue") { type = NavType.LongType })) { entry ->
+            com.alondra1.app.features.notes.NoteConflictScreen(container, entry.arguments?.getLong("issue") ?: 0L, onClose = { nav.popBackStack() },
+                onResolved = { id ->
+                    // Leave the compare screen and the note opened before it, then show the result fresh.
+                    nav.popBackStack()
+                    if (nav.currentDestination?.route == Routes.NOTE) nav.popBackStack()
+                    if (id != null) nav.navigate(Routes.note(id))
+                })
+        }
+    }
     }
 }

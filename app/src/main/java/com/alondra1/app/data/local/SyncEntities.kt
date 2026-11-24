@@ -33,6 +33,8 @@ data class SyncIssueEntity(
     val title: String,
     val message: String,
     val createdUtc: Long,
+    /** For a note conflict: the conflict copy holding this device's version (compare and resolve it). */
+    val copyId: String? = null,
 )
 
 @Dao
@@ -66,4 +68,11 @@ interface SyncDao {
 
     @Query("DELETE FROM sync_issues WHERE id = :id")
     suspend fun dismissIssue(id: Long)
+
+    @Query("SELECT * FROM sync_issues WHERE id = :id")
+    suspend fun issue(id: Long): SyncIssueEntity?
+
+    /** The unresolved conflict a note is part of (as the note or as its conflict copy), if any. */
+    @Query("SELECT * FROM sync_issues WHERE entityType = 'note' AND copyId IS NOT NULL AND (entityId = :noteId OR copyId = :noteId) ORDER BY id DESC LIMIT 1")
+    fun observeNoteConflict(noteId: String): Flow<SyncIssueEntity?>
 }

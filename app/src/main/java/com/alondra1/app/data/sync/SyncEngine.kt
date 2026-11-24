@@ -326,6 +326,7 @@ class SyncEngine(
     private suspend fun keepBoth(row: OutboxEntity, current: JsonObject?, currentDeleted: Boolean) {
         val now = time.now()
         val copyId = Ids.newId()
+        var noteCopy: String? = null
         val title = titleOf(row.entityType, row.entityId)
         when (row.entityType) {
             EntityType.TASK.wire -> db.tasks().get(row.entityId)?.takeIf { it.deletedUtc == null }?.let {
@@ -333,8 +334,9 @@ class SyncEngine(
                 enqueue(EntityType.TASK, copyId)
             }
             EntityType.NOTE.wire -> db.notes().get(row.entityId)?.takeIf { it.deletedUtc == null }?.let {
-                db.notes().put(it.copy(id = copyId, title = (com.alondra1.app.domain.NoteRules.displayTitle(it) + " (conflict copy)").take(500), serverVersion = null, remoteJson = null, createdUtc = now, modifiedUtc = now))
+                db.notes().put(it.copy(id = copyId, title = (com.alondra1.app.domain.NoteRules.displayTitle(it) + com.alondra1.app.domain.NoteMerge.CONFLICT_SUFFIX).take(500), serverVersion = null, remoteJson = null, createdUtc = now, modifiedUtc = now))
                 enqueue(EntityType.NOTE, copyId)
+                noteCopy = copyId
             }
             EntityType.EVENT.wire -> db.events().get(row.entityId)?.takeIf { it.deletedUtc == null }?.let {
                 db.events().put(it.copy(id = copyId, title = (it.title + " (conflict copy)").take(500), serverVersion = null, createdUtc = now, modifiedUtc = now))
@@ -347,7 +349,7 @@ class SyncEngine(
         sync.addIssue(SyncIssueEntity(entityType = row.entityType, entityId = row.entityId, title = title,
             message = if (currentDeleted) "It was deleted on another device while you edited it here. Your version was kept as a conflict copy."
             else "It was changed on another device too. The other version is shown; yours was kept as a conflict copy.",
-            createdUtc = now.toEpochMilli()))
+            createdUtc = now.toEpochMilli(), copyId = noteCopy))
     }
 
     // ------------------------------------------------------------------------------------------- pull
