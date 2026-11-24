@@ -12,8 +12,9 @@ import java.time.LocalTime
 
 /**
  * Field names and meanings follow the shared task contract (todo-v1): date-only due dates, local wall-clock
- * times without offset, UTC instants for timestamps. `remoteJson` keeps fields another client wrote that this
- * app does not edit yet (recurrence, steps, attachments) so they survive a round trip through Cloud Sync.
+ * times without offset, UTC instants for timestamps. Steps, the repeat rule and reminders are stored as contract JSON
+ * (domain/TaskModel.kt). `remoteJson` keeps fields another client wrote that this app does not edit (attachments, and
+ * unknown fields) so they survive a round trip through Cloud Sync.
  */
 @Entity(tableName = "task_lists", indices = [Index("position"), Index("deletedUtc")])
 data class TaskListEntity(
@@ -27,6 +28,37 @@ data class TaskListEntity(
     val deletedUtc: Instant? = null,
     val remoteJson: String? = null,
     val serverVersion: Long? = null,
+    /** List group (contract: groupId); null = not grouped. */
+    val groupId: String? = null,
+)
+
+/** A group of lists (contract ListGroup). [collapsed] is a device-local presentation preference, never synced. */
+@Entity(tableName = "list_groups", indices = [Index("deletedUtc")])
+data class ListGroupEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val position: Double,
+    val collapsed: Boolean = false,
+    val createdUtc: Instant,
+    val modifiedUtc: Instant,
+    val deletedUtc: Instant? = null,
+    val serverVersion: Long? = null,
+    val remoteJson: String? = null,
+)
+
+/**
+ * One completion of a task (contract CompletionRecord), appended when a task is completed; for a repeating task one
+ * per occurrence. [sent] = known to the cloud (sent with the completing task change, or received from it).
+ */
+@Entity(tableName = "completion_records", indices = [Index("taskId"), Index("sent")])
+data class CompletionRecordEntity(
+    @PrimaryKey val id: String,
+    val taskId: String,
+    val title: String,
+    val listId: String,
+    val completedUtc: Instant,
+    val occurrenceDate: LocalDate? = null,
+    val sent: Boolean = false,
 )
 
 @Entity(
@@ -47,13 +79,21 @@ data class TaskEntity(
     val dueDate: LocalDate? = null,
     val dueTime: LocalTime? = null,
     val myDayDate: LocalDate? = null,
-    /** One reminder in Phase 1 (contract: reminders[0].at), local wall-clock time. */
+    /** Legacy single reminder of schema 4; migrated into [remindersJson] (schema 5) and no longer written. */
     val reminderAt: LocalDateTime? = null,
     /** Device-local link back to the note a task was created from. */
     val sourceNoteId: String? = null,
     val deletedUtc: Instant? = null,
     val remoteJson: String? = null,
     val serverVersion: Long? = null,
+    /** Contract startDate (date only). */
+    val startDate: LocalDate? = null,
+    /** Contract RecurrenceRule as JSON; null = does not repeat. */
+    val recurrenceJson: String? = null,
+    /** Contract subtasks (steps) as a JSON array, in order. */
+    val stepsJson: String = "[]",
+    /** Contract reminders (definitions: id and local wall-clock time) as a JSON array. */
+    val remindersJson: String = "[]",
 )
 
 /**

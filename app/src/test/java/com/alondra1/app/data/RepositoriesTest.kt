@@ -92,10 +92,10 @@ class RepositoriesTest {
     @Test fun deletingAListWithItsTasks() = runBlocking<Unit> {
         val home = c.todo.createList("Home")
         val a = c.todo.addTask("A", listId = home.id)
-        c.todo.setReminder(a.id, LocalDateTime.of(today, java.time.LocalTime.NOON))
+        c.todo.addReminder(a.id, LocalDateTime.of(today, java.time.LocalTime.NOON))
         c.todo.deleteList(home.id, moveTasksToDefault = false)
         assertNotNull(c.db.tasks().get(a.id)!!.deletedUtc)
-        assertFalse(reminders.scheduled.containsKey("task:${a.id}"))
+        assertFalse(reminders.scheduled.keys.any { it.startsWith("task:${a.id}:") })
     }
 
     @Test fun defaultListCannotBeDeleted() = runBlocking<Unit> {
@@ -106,11 +106,16 @@ class RepositoriesTest {
 
     @Test fun remindersFollowEditsWithoutDuplicates() = runBlocking<Unit> {
         val t = c.todo.addTask("Dentist")
-        c.todo.setReminder(t.id, LocalDateTime.parse("2026-11-24T09:00"))
-        c.todo.setReminder(t.id, LocalDateTime.parse("2026-11-24T10:00"))
-        assertEquals(mapOf("task:${t.id}" to "2026-11-24T10:00"), reminders.scheduled)
+        c.todo.addReminder(t.id, LocalDateTime.parse("2026-11-24T09:00"))
+        c.todo.addReminder(t.id, LocalDateTime.parse("2026-11-24T10:00"))
+        c.todo.addReminder(t.id, LocalDateTime.parse("2026-11-24T10:00")) // same time twice: one reminder
+        assertEquals(setOf("2026-11-24T09:00", "2026-11-24T10:00"), reminders.scheduled.values.toSet())
+        assertEquals(2, reminders.scheduled.size)
+        val first = c.todo.reminders(c.todo.getTask(t.id)!!).first()
+        c.todo.removeReminder(t.id, first.id)
+        assertEquals(listOf("2026-11-24T10:00"), reminders.scheduled.values.toList())
         c.todo.setCompleted(t.id, true)
-        assertTrue("completing cancels the reminder", reminders.scheduled.isEmpty())
+        assertTrue("completing cancels the reminders", reminders.scheduled.isEmpty())
         c.todo.setCompleted(t.id, false)
         assertEquals(1, reminders.scheduled.size)
         c.todo.deleteTask(t.id)
@@ -188,7 +193,7 @@ class RepositoriesTest {
      * change without a new schema version and migration fails here.
      */
     @Test fun committedSchemaMatchesTheEntities() = runBlocking<Unit> {
-        val version = 4
+        val version = 5
         val json = File("schemas/com.alondra1.app.data.local.AppDatabase/$version.json").readText()
         val expected = Regex(""""identityHash"\s*:\s*"([0-9a-f]+)"""").find(json)!!.groupValues[1]
         val db = TestSupport.memoryDb()

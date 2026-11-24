@@ -34,7 +34,9 @@ class MigrationTest {
         val db = Room.databaseBuilder(TestSupport.context(), AppDatabase::class.java, name).addMigrations(*AppDatabase.MIGRATIONS).allowMainThreadQueries().build()
         val task = db.tasks().get("t1")!!
         assertEquals("Kept across upgrades", task.title)
-        assertEquals(java.time.LocalDateTime.parse("2026-11-24T09:00"), task.reminderAt)
+        // Schema 5 turned the single reminder into the reminder list, keeping its synced id.
+        assertEquals("""[{"id":"t1-r","at":"2026-11-24T09:00:00"}]""", task.remindersJson)
+        assertEquals(null, task.reminderAt)
         assertEquals("body", db.notes().get("n1")!!.body)
         assertEquals(java.time.LocalDate.parse("2026-12-27"), db.events().get("e1")!!.endDate)
         assertEquals(0, db.sync().outbox().size)
@@ -69,6 +71,30 @@ class MigrationTest {
         val old = db.sync().issue(1)!!
         assertEquals("Old", old.title)
         assertEquals(null, old.copyId)
+        db.close()
+    }
+
+    @Test fun version4To5MovesTheReminderIntoTheListAndAddsGroupsAndHistory() = runBlocking<Unit> {
+        val name = "migration-4-5.db"
+        helper.createDatabase(name, 4).apply {
+            execSQL("INSERT INTO task_lists (id, name, color, position, isDefault, createdUtc, modifiedUtc, deletedUtc, remoteJson, serverVersion) VALUES ('l1', 'Tasks', NULL, 0, 1, 1, 1, NULL, NULL, 3)")
+            execSQL("INSERT INTO tasks (id, listId, title, notes, completed, important, position, createdUtc, modifiedUtc, completedUtc, dueDate, dueTime, myDayDate, reminderAt, sourceNoteId, deletedUtc, remoteJson, serverVersion) " +
+                "VALUES ('t1', 'l1', 'Dentist', '', 0, 0, 1, 1, 1, NULL, '2026-11-24', NULL, NULL, '2026-11-24T09:00', NULL, NULL, NULL, 7)")
+            execSQL("INSERT INTO tasks (id, listId, title, notes, completed, important, position, createdUtc, modifiedUtc, completedUtc, dueDate, dueTime, myDayDate, reminderAt, sourceNoteId, deletedUtc, remoteJson, serverVersion) " +
+                "VALUES ('t2', 'l1', 'No reminder', '', 0, 0, 2, 1, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 5, true, *AppDatabase.MIGRATIONS)
+        val db = Room.databaseBuilder(TestSupport.context(), AppDatabase::class.java, name).addMigrations(*AppDatabase.MIGRATIONS).allowMainThreadQueries().build()
+        val t1 = db.tasks().get("t1")!!
+        assertEquals(listOf(com.alondra1.app.domain.TaskReminder("t1-r", java.time.LocalDateTime.parse("2026-11-24T09:00"))),
+            com.alondra1.app.domain.TaskJson.reminders(t1.remindersJson))
+        assertEquals("[]", t1.stepsJson)
+        assertEquals(7L, t1.serverVersion)
+        assertEquals("[]", db.tasks().get("t2")!!.remindersJson)
+        assertEquals(null, db.taskLists().get("l1")!!.groupId)
+        assertEquals(0, db.listGroups().active().size)
+        assertEquals(0, db.completions().forTask("t1").size)
         db.close()
     }
 }

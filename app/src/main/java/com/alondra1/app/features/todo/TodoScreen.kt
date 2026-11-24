@@ -123,6 +123,7 @@ fun TodoScreen(
     var listMenu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var deletingList by remember { mutableStateOf(false) }
+    var choosingGroup by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     Column(Modifier.fillMaxSize()) {
@@ -162,6 +163,7 @@ fun TodoScreen(
                         IconButton(onClick = { listMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "List options") }
                         DropdownMenu(expanded = listMenu, onDismissRequest = { listMenu = false }) {
                             DropdownMenuItem(text = { Text("Rename list") }, onClick = { listMenu = false; renaming = true })
+                            DropdownMenuItem(text = { Text("Move to group…") }, onClick = { listMenu = false; choosingGroup = true })
                             DropdownMenuItem(text = { Text("Move up") }, onClick = { listMenu = false; viewModel.moveList(selection.id, -1) })
                             DropdownMenuItem(text = { Text("Move down") }, onClick = { listMenu = false; viewModel.moveList(selection.id, 1) })
                             DropdownMenuItem(text = { Text("Delete list") }, onClick = { listMenu = false; deletingList = true })
@@ -231,6 +233,10 @@ fun TodoScreen(
             onDismiss = { showDestinations = false },
             onSelect = { viewModel.select(it); showDestinations = false },
             onCreateList = { name -> scope.launch { viewModel.createList(name)?.let { viewModel.select(TodoSelection.List(it.id)) }; showDestinations = false } },
+            onCreateGroup = viewModel::createGroup,
+            onRenameGroup = viewModel::renameGroup,
+            onDeleteGroup = viewModel::deleteGroup,
+            onToggleGroup = viewModel::toggleGroup,
         )
     }
     val selection = state.selection
@@ -238,6 +244,23 @@ fun TodoScreen(
         NameDialog(title = "Rename list", initial = state.title, confirm = "Rename", onDismiss = { renaming = false }) {
             viewModel.renameList(selection.id, it); renaming = false
         }
+    }
+    if (choosingGroup && selection is TodoSelection.List) {
+        val current = state.lists.firstOrNull { it.id == selection.id }?.groupId
+        AlertDialog(
+            onDismissRequest = { choosingGroup = false },
+            title = { Text("Move \"${state.title}\" to") },
+            text = {
+                Column {
+                    TextButton(onClick = { viewModel.setListGroup(selection.id, null); choosingGroup = false }) { Text((if (current == null) "✓ " else "") + "No group") }
+                    state.groups.forEach { g ->
+                        TextButton(onClick = { viewModel.setListGroup(selection.id, g.id); choosingGroup = false }) { Text((if (current == g.id) "✓ " else "") + g.name) }
+                    }
+                    if (state.groups.isEmpty()) Text("Create a group with New group in the lists sheet.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingGroup = false }) { Text("Close") } },
+        )
     }
     if (deletingList && selection is TodoSelection.List) {
         AlertDialog(
@@ -327,7 +350,7 @@ fun TaskRow(
                             fontWeight = if (overdue) FontWeight.SemiBold else null,
                         )
                     }
-                    if (task.reminderAt != null && !task.completed) {
+                    if (task.remindersJson != "[]" && !task.completed) {
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Filled.Notifications, contentDescription = "Has a reminder", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -402,8 +425,21 @@ fun QuickAddBar(hint: String, onAdd: suspend (String, LocalDate?, Boolean) -> St
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DestinationsSheet(state: TodoUiState, onDismiss: () -> Unit, onSelect: (TodoSelection) -> Unit, onCreateList: (String) -> Unit) {
+private fun DestinationsSheet(
+    state: TodoUiState,
+    onDismiss: () -> Unit,
+    onSelect: (TodoSelection) -> Unit,
+    onCreateList: (String) -> Unit,
+    onCreateGroup: (String) -> Unit = {},
+    onRenameGroup: (String, String) -> Unit = { _, _ -> },
+    onDeleteGroup: (String) -> Unit = {},
+    onToggleGroup: (String, Boolean) -> Unit = { _, _ -> },
+) {
     var creating by remember { mutableStateOf(false) }
+    var creatingGroup by remember { mutableStateOf(false) }
+    var renamingGroup by remember { mutableStateOf<com.alondra1.app.data.local.ListGroupEntity?>(null) }
+    val groupIds = state.groups.map { it.id }.toSet()
+    val ungrouped = state.lists.filter { it.groupId == null || it.groupId !in groupIds }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.testTag("destinations")) {
             items(SmartView.entries) { view ->
@@ -416,19 +452,45 @@ private fun DestinationsSheet(state: TodoUiState, onDismiss: () -> Unit, onSelec
                 Text("Lists", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             }
-            items(state.lists, key = { it.id }) { list ->
+            items(ungrouped, key = { it.id }) { list ->
                 DestinationRow(Icons.AutoMirrored.Filled.List, list.name, state.listCounts[list.id] ?: 0, state.selection == TodoSelection.List(list.id)) {
                     onSelect(TodoSelection.List(list.id))
                 }
             }
+            state.groups.forEach { group ->
+                item(key = "group-" + group.id) {
+                    var menu by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { onToggleGroup(group.id, !group.collapsed) }.padding(start = 24.dp, end = 8.dp).testTag("group")) {
+                        Text((if (group.collapsed) "▸ " else "▾ ") + group.name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Group options for ${group.name}") }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text("Rename group") }, onClick = { menu = false; renamingGroup = group })
+                                DropdownMenuItem(text = { Text("Remove group (keeps its lists)") }, onClick = { menu = false; onDeleteGroup(group.id) })
+                            }
+                        }
+                    }
+                }
+                if (!group.collapsed) items(state.lists.filter { it.groupId == group.id }, key = { it.id }) { list ->
+                    DestinationRow(Icons.AutoMirrored.Filled.List, list.name, state.listCounts[list.id] ?: 0, state.selection == TodoSelection.List(list.id)) {
+                        onSelect(TodoSelection.List(list.id))
+                    }
+                }
+            }
             item {
-                TextButton(onClick = { creating = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
-                    Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("New list")
+                Row {
+                    TextButton(onClick = { creating = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("New list")
+                    }
+                    TextButton(onClick = { creatingGroup = true }) { Text("New group") }
                 }
             }
         }
     }
     if (creating) NameDialog(title = "New list", initial = "", confirm = "Create", onDismiss = { creating = false }) { onCreateList(it); creating = false }
+    if (creatingGroup) NameDialog(title = "New group", initial = "", confirm = "Create", onDismiss = { creatingGroup = false }) { onCreateGroup(it); creatingGroup = false }
+    renamingGroup?.let { g -> NameDialog(title = "Rename group", initial = g.name, confirm = "Rename", onDismiss = { renamingGroup = null }) { onRenameGroup(g.id, it); renamingGroup = null } }
 }
 
 @Composable

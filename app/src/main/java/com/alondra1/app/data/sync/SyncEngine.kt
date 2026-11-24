@@ -130,6 +130,7 @@ class SyncEngine(
         db.withTransaction {
             adoptRemoteDefaultList()
             // Everything local that the cloud does not have yet goes up as a create.
+            db.listGroups().active().filter { it.serverVersion == null && it.id !in remoteIds["group"].orEmpty() }.forEach { enqueue(EntityType.LIST_GROUP, it.id) }
             db.taskLists().active().filter { it.serverVersion == null && it.id !in remoteIds["list"].orEmpty() }.forEach { enqueue(EntityType.TASK_LIST, it.id) }
             db.tasks().all().filter { it.serverVersion == null && it.id !in remoteIds["task"].orEmpty() }.forEach { enqueue(EntityType.TASK, it.id) }
             db.noteFolders().active().filter { it.serverVersion == null && it.id !in remoteIds["note_folder"].orEmpty() }.forEach { enqueue(EntityType.NOTE_FOLDER, it.id) }
@@ -207,7 +208,10 @@ class SyncEngine(
         return _status.value
     }
 
-    private val typeOrder = listOf(EntityType.TASK_LIST.wire, EntityType.TASK.wire, EntityType.NOTE_FOLDER.wire, EntityType.NOTE.wire, EntityType.EVENT.wire)
+    private val typeOrder = listOf(EntityType.LIST_GROUP.wire, EntityType.TASK_LIST.wire, EntityType.TASK.wire, EntityType.NOTE_FOLDER.wire, EntityType.NOTE.wire, EntityType.EVENT.wire)
+
+    /** mutation id -> completion record sent with it (append_completion), marked sent when the mutation is applied. */
+    private val sentCompletions = mutableMapOf<String, String>()
 
     private suspend fun push(tenantId: String) {
         val pending = sync.outbox().sortedWith(compareBy({ typeOrder.indexOf(it.entityType) }, { it.seq }))
@@ -258,6 +262,7 @@ class SyncEngine(
     /** Builds create/patch/delete for the item's current local state; null when there is nothing to send. */
     private suspend fun mutationFor(row: OutboxEntity): JsonObject? {
         val (local, remoteJson, version, deleted) = when (row.entityType) {
+            EntityType.LIST_GROUP.wire -> db.listGroups().get(row.entityId)?.let { Quad(WireMapper.group(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
             EntityType.TASK.wire -> db.tasks().get(row.entityId)?.let { Quad(WireMapper.task(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
             EntityType.TASK_LIST.wire -> db.taskLists().get(row.entityId)?.let { Quad(WireMapper.list(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
             EntityType.NOTE.wire -> db.notes().get(row.entityId)?.let { Quad(WireMapper.note(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
@@ -273,7 +278,15 @@ class SyncEngine(
                 version == null && deleted -> return null // created and deleted before it ever synced
                 version == null -> { put("action", "create"); put("resource", local) }
                 deleted -> { put("action", "delete"); put("base_version", version) }
-                else -> { put("action", "patch"); put("base_version", version); put("changes", diff(remoteJson, local)) }
+                else -> {
+                    put("action", "patch"); put("base_version", version); put("changes", diff(remoteJson, local))
+                    // One completion record per task change, appended by the server in the same transaction, so a
+                    // completed occurrence is recorded exactly once (the receipt makes retries safe).
+                    if (row.entityType == EntityType.TASK.wire) db.completions().oldestUnsent(row.entityId)?.let { c ->
+                        put("append_completion", WireMapper.completion(c))
+                        sentCompletions[row.mutationId] = c.id
+                    }
+                }
             }
         }
     }
@@ -292,6 +305,11 @@ class SyncEngine(
                 (result["record"] as? JsonObject)?.let { applyRecord(row.entityType, it, force = true) }
                     ?: markDeletedSynced(row.entityType, row.entityId)
                 sync.complete(row.entityType, row.entityId, row.mutationId)
+                sentCompletions.remove(row.mutationId)?.let { db.completions().markSent(it) }
+                // More completions waiting (offline completions, or the task was created and completed before its first
+                // sync): send the next one with another change.
+                if (row.entityType == EntityType.TASK.wire && db.completions().unsentCount(row.entityId) > 0 &&
+                    db.tasks().get(row.entityId)?.deletedUtc == null) enqueue(EntityType.TASK, row.entityId)
             }
             "conflict" -> db.withTransaction {
                 keepBoth(row, result["current"] as? JsonObject, result["current_deleted"]?.jsonPrimitive?.booleanOrNull == true)
@@ -307,6 +325,7 @@ class SyncEngine(
     }
 
     private suspend fun titleOf(type: String, id: String): String = when (type) {
+        EntityType.LIST_GROUP.wire -> db.listGroups().get(id)?.name
         EntityType.TASK.wire -> db.tasks().get(id)?.title
         EntityType.TASK_LIST.wire -> db.taskLists().get(id)?.name
         EntityType.NOTE.wire -> db.notes().get(id)?.let { com.alondra1.app.domain.NoteRules.displayTitle(it) }
@@ -386,7 +405,11 @@ class SyncEngine(
 
     private suspend fun applyUpsert(item: JsonObject, merging: Boolean) {
         val type = item["resource_type"]?.jsonPrimitive?.contentOrNull ?: return
-        if (type !in typeOrder) return // groups, completions and settings are kept by the clients that edit them
+        if (type == "completion") { // completion history from another device (or this one): append-only, ids are global
+            (item["record"] as? JsonObject)?.let(WireMapper::completionFrom)?.let { db.completions().insert(it) }
+            return
+        }
+        if (type !in typeOrder) return // settings are kept by the clients that edit them
         val record = item["record"] as? JsonObject ?: return
         val id = record["id"]?.jsonPrimitive?.contentOrNull ?: return
         if (dirty(type, id)) {
@@ -401,6 +424,7 @@ class SyncEngine(
     private suspend fun adoptVersion(type: String, id: String, record: JsonObject) {
         val version = record["version"]?.jsonPrimitive?.longOrNull ?: return
         when (type) {
+            EntityType.LIST_GROUP.wire -> db.listGroups().get(id)?.let { db.listGroups().put(it.copy(serverVersion = version, remoteJson = (record["group"] as? JsonObject)?.toString())) }
             EntityType.TASK.wire -> db.tasks().get(id)?.let { db.tasks().put(it.copy(serverVersion = version, remoteJson = (record["task"] as? JsonObject)?.toString())) }
             EntityType.TASK_LIST.wire -> db.taskLists().get(id)?.let { db.taskLists().put(it.copy(serverVersion = version, remoteJson = (record["list"] as? JsonObject)?.toString())) }
             EntityType.NOTE.wire -> db.notes().get(id)?.let { db.notes().put(it.copy(serverVersion = version, remoteJson = (record["note"] as? JsonObject)?.toString())) }
@@ -412,6 +436,11 @@ class SyncEngine(
     private suspend fun applyRecord(type: String, record: JsonObject, force: Boolean) {
         val version = record["version"]?.jsonPrimitive?.longOrNull ?: return
         when (type) {
+            EntityType.LIST_GROUP.wire -> (record["group"] as? JsonObject)?.let { o ->
+                val local = db.listGroups().get(o["id"]!!.jsonPrimitive.content)
+                if (!force && local?.serverVersion != null && local.serverVersion >= version) return
+                db.listGroups().put(WireMapper.groupFrom(o, version, local))
+            }
             EntityType.TASK.wire -> (record["task"] as? JsonObject)?.let { o ->
                 val local = db.tasks().get(o["id"]!!.jsonPrimitive.content)
                 if (!force && local?.serverVersion != null && local.serverVersion >= version) return
@@ -457,6 +486,10 @@ class SyncEngine(
     private suspend fun tombstone(type: String, id: String) {
         val now = time.now()
         when (type) {
+            EntityType.LIST_GROUP.wire -> db.listGroups().get(id)?.let { g ->
+                db.listGroups().put(g.copy(deletedUtc = now)) // its lists become ungrouped (the server clears groupId)
+                db.taskLists().active().filter { it.groupId == id }.forEach { db.taskLists().put(it.copy(groupId = null)) }
+            }
             EntityType.TASK.wire -> db.tasks().get(id)?.let { db.tasks().put(it.copy(deletedUtc = now)); reminders.cancelTask(id) }
             EntityType.TASK_LIST.wire -> db.taskLists().get(id)?.let { db.taskLists().put(it.copy(deletedUtc = now)) }
             EntityType.NOTE.wire -> db.notes().get(id)?.let { db.notes().put(it.copy(deletedUtc = now)) }

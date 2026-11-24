@@ -58,7 +58,7 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE listId = :listId AND deletedUtc IS NULL")
     suspend fun inList(listId: String): List<TaskEntity>
 
-    @Query("SELECT * FROM tasks WHERE deletedUtc IS NULL AND completed = 0 AND reminderAt IS NOT NULL")
+    @Query("SELECT * FROM tasks WHERE deletedUtc IS NULL AND completed = 0 AND remindersJson != '[]'")
     suspend fun withReminders(): List<TaskEntity>
 
     @Query("SELECT COALESCE(MAX(position), 0) FROM tasks WHERE listId = :listId")
@@ -222,4 +222,51 @@ interface MaintenanceDao {
     /** Tombstones older than [before] that never left this device can be removed for good. */
     @Query("DELETE FROM tasks WHERE deletedUtc IS NOT NULL AND deletedUtc < :before AND serverVersion IS NULL")
     suspend fun purgeLocalTaskTombstones(before: Instant)
+}
+
+@Dao
+interface ListGroupDao {
+    @Query("SELECT * FROM list_groups WHERE deletedUtc IS NULL ORDER BY position, name")
+    fun observeActive(): Flow<List<ListGroupEntity>>
+
+    @Query("SELECT * FROM list_groups WHERE deletedUtc IS NULL ORDER BY position, name")
+    suspend fun active(): List<ListGroupEntity>
+
+    @Query("SELECT * FROM list_groups")
+    suspend fun allIncludingDeleted(): List<ListGroupEntity>
+
+    @Query("SELECT * FROM list_groups WHERE id = :id")
+    suspend fun get(id: String): ListGroupEntity?
+
+    @Query("SELECT COALESCE(MAX(position), 0) FROM list_groups")
+    suspend fun maxPosition(): Double
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(group: ListGroupEntity)
+}
+
+@Dao
+interface CompletionDao {
+    @Query("SELECT * FROM completion_records ORDER BY completedUtc DESC")
+    fun observeAll(): Flow<List<CompletionRecordEntity>>
+
+    @Query("SELECT * FROM completion_records WHERE taskId = :taskId ORDER BY completedUtc DESC")
+    suspend fun forTask(taskId: String): List<CompletionRecordEntity>
+
+    /** The oldest completion of the task not yet known to the cloud (sent with the task's next push). */
+    @Query("SELECT * FROM completion_records WHERE taskId = :taskId AND sent = 0 ORDER BY completedUtc LIMIT 1")
+    suspend fun oldestUnsent(taskId: String): CompletionRecordEntity?
+
+    @Query("SELECT COUNT(*) FROM completion_records WHERE taskId = :taskId AND sent = 0")
+    suspend fun unsentCount(taskId: String): Int
+
+    @Query("UPDATE completion_records SET sent = 1 WHERE id = :id")
+    suspend fun markSent(id: String)
+
+    @Query("DELETE FROM completion_records WHERE id = :id")
+    suspend fun delete(id: String)
+
+    /** Received from the cloud: insert or keep (ids are global, a record never changes). */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(record: CompletionRecordEntity)
 }

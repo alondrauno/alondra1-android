@@ -29,7 +29,9 @@ class WireMapperTest {
 
     @Test fun fieldsAndroidDoesNotEditSurviveARoundTrip() {
         val local = WireMapper.taskFrom(windowsTask, 4, null)
-        assertEquals(LocalDateTime.parse("2026-11-30T09:00"), local.reminderAt)
+        assertEquals(listOf(com.alondra1.app.domain.TaskReminder("t-win-r", LocalDateTime.parse("2026-11-30T09:00"))), com.alondra1.app.domain.TaskJson.reminders(local.remindersJson))
+        assertEquals("Monthly", com.alondra1.app.domain.TaskJson.recurrence(local.recurrenceJson)!!.frequency.name)
+        assertEquals("Transfer", com.alondra1.app.domain.TaskJson.steps(local.stepsJson).single().title)
         val edited = local.copy(title = "Pay rent now", important = true)
         val out = WireMapper.task(edited)
         assertEquals("Monthly", out["recurrence"]!!.jsonObject["frequency"]!!.jsonPrimitive.content)
@@ -39,7 +41,7 @@ class WireMapperTest {
     }
 
     @Test fun contractFormats() {
-        val t = task(id = "abc", due = LocalDate.parse("2026-11-24"), dueTime = LocalTime.of(16, 0)).copy(reminderAt = LocalDateTime.parse("2026-11-24T15:30"))
+        val t = task(id = "abc", due = LocalDate.parse("2026-11-24"), dueTime = LocalTime.of(16, 0)).copy(remindersJson = """[{"id":"abc-r","at":"2026-11-24T15:30:00"}]""")
         val o = WireMapper.task(t)
         assertEquals("16:00:00", o["dueTime"]!!.jsonPrimitive.content)
         assertEquals("2026-11-24", o["dueDate"]!!.jsonPrimitive.content)
@@ -49,7 +51,7 @@ class WireMapperTest {
     }
 
     @Test fun clearedFieldsAreNotSentAndEventsKeepDateOnlySemantics() {
-        val local = WireMapper.taskFrom(windowsTask, 4, null).copy(dueDate = null, reminderAt = null)
+        val local = WireMapper.taskFrom(windowsTask, 4, null).copy(dueDate = null, remindersJson = "[]")
         val out = WireMapper.task(local)
         assertNull(out["dueDate"])
         assertEquals(0, out["reminders"]!!.jsonArray.size)

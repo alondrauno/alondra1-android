@@ -47,17 +47,20 @@ Code: `features/todo/` (`TodoScreen`, `TodoViewModel`, `TaskDetailScreen`), `dat
 | --- | --- | --- | --- |
 | TODO-TASK-01 | Create, edit, delete (Undo), complete and reopen | Done | |
 | TODO-TASK-02 | Title (1–500 chars), notes, important | Done | |
-| TODO-TASK-03 | Steps (subtasks) | Gap | Synced steps from Windows are kept unchanged. |
+| TODO-TASK-03 | Steps (subtasks): add, check, reorder, remove; unknown keys of each step kept | Done | `TaskJson`, `TaskParityRepositoryTest`. |
 | TODO-TASK-06 | File attachments | Gap | Out of scope for phase 1. |
 | TODO-TASK-08 | Move a task to another list | Done | Task detail. |
 | TODO-TASK-10 | A task can remember the note it came from (`sourceNoteId`) | Done | Checklist → task. |
 | TODO-DATE-01 | Due date and optional time | Done | |
 | TODO-DATE-02 | My Day (explicit; starts empty each day) | Done | |
-| TODO-DATE-03 | Repeats | Gap | Out of scope for phase 1. |
-| TODO-REM-01 | One reminder per task (date and time) | Partial | Windows allows several. |
+| TODO-DATE-03 | Repeats: daily, weekdays, weekly, monthly, yearly, every N; series anchor (Jan 31 → Feb 28 → Mar 31), end date | Done | `domain/TaskModel.kt` (`Recurrence`, port of the Windows rules), `TaskParityTest`. |
+| TODO-DATE-04 | Completing a repeating task moves it to the next occurrence (start date and reminders shift, steps reset) in one transaction; one completion record per occurrence | Done | `TaskCompletion`, `TodoRepository.setCompleted`. |
+| TODO-DATE-05 | Start date | Done | |
+| TODO-HIST-01 | Completion history (local, synced with the completing change as `append_completion`, received from other devices) | Done | `completion_records`; Undo removes an unsent entry. |
+| TODO-REM-01 | Several reminders per task (definitions synced; delivery state stays on the device) | Done | One WorkManager job per reminder, no duplicates. |
 | TODO-LIST-01 | Create and rename lists; reorder with Move up/down | Done | |
 | TODO-LIST-02 | Delete a list (asks): move its tasks to Tasks (recommended) or delete them | Done | Default list can't be deleted. |
-| TODO-LIST-03 | List groups | Gap | Groups are not synced to Android; a list keeps its group for Windows. |
+| TODO-LIST-03 | List groups: create, rename, remove (lists are kept, ungrouped), move a list to a group, collapse (device-local) | Done | Synced as kind `group`. |
 | TODO-VIEW-01 | Smart views: My Day, Important, Planned, Upcoming, Overdue, All, Completed, Unscheduled | Done | Same rules as Windows. |
 | TODO-VIEW-02 | Sort | Done | |
 | TODO-VIEW-03 | All Tasks filter: Open, All, Completed | Done | |
@@ -157,7 +160,7 @@ Code: `data/notifications/` (`Notifications.kt`, `WorkManagerReminderScheduler.k
 | ID | Atomic feature | Status | Notes |
 | --- | --- | --- | --- |
 | REM-CH-01 | Separate channels for task and event reminders | Done | |
-| REM-SCH-01 | One unique pending reminder per item; edits replace it; complete or delete cancels it | Done | |
+| REM-SCH-01 | One unique pending job per task reminder and per event; edits replan them; complete or delete cancels them | Done | Jobs of schema 4 (one per task) are cancelled too. |
 | REM-SCH-02 | Approximate delivery (WorkManager); survives reboots; re-planned on time zone or clock change | Done | No exact alarms. |
 | REM-SCH-03 | All-day event reminders count from 09:00 on the start day | Done | |
 | REM-PERM-01 | `POST_NOTIFICATIONS` asked only when a reminder is turned on; denial explained | Done | |
@@ -181,7 +184,7 @@ Code: `data/sync/` (`SyncEngine`, `WireMapper`, `OutboxRecorder`, `ChangeRecorde
 
 | ID | Atomic feature | Status | Notes |
 | --- | --- | --- | --- |
-| SYNC-KIND-01 | Kinds: task lists, tasks, note folders, notes (+ pictures), calendar events | Done | List groups are not synced on Android. |
+| SYNC-KIND-01 | Kinds: list groups, task lists, tasks (steps, repeat, start date, reminders), note folders, notes (+ pictures), calendar events; completion records | Done | Groups before lists in a push. |
 | SYNC-ON-01 | Merge preview, then download and merge (nothing replaced or deleted) | Done | |
 | SYNC-ON-02 | Never-synced default list hands its tasks to the cloud default list | Done | |
 | SYNC-OUT-01 | Local changes queued in `sync_outbox` in the same Room transaction | Done | |

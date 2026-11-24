@@ -37,6 +37,7 @@ data class TodoUiState(
     val title: String = SmartView.MY_DAY.title,
     val tasks: List<TaskEntity> = emptyList(),
     val lists: List<TaskListEntity> = emptyList(),
+    val groups: List<com.alondra1.app.data.local.ListGroupEntity> = emptyList(),
     val counts: Map<SmartView, Int> = emptyMap(),
     val listCounts: Map<String, Int> = emptyMap(),
     val sort: TaskSort = TaskSort.DUE_DATE,
@@ -63,11 +64,11 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
 
     val state: StateFlow<TodoUiState> = combine(
         todo.observeTasks(),
-        todo.observeLists(),
+        combine(todo.observeLists(), todo.observeGroups()) { l, g -> l to g },
         container.settings.settings.map { it.taskSort },
         combine(selection, status) { s, f -> s to f },
         clock,
-    ) { tasks, lists, sort, (sel, filter), now ->
+    ) { tasks, (lists, groups), sort, (sel, filter), now ->
         val visible = when (sel) {
             is TodoSelection.View -> TaskRules.select(sel.view, tasks, now, sort, filter)
             is TodoSelection.List -> TaskRules.sort(tasks.filter { TaskRules.inList(it, sel.id, filter) }, sort)
@@ -82,6 +83,7 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
             title = title,
             tasks = visible,
             lists = lists,
+            groups = groups,
             counts = TaskRules.counts(tasks, now),
             listCounts = TaskRules.listCounts(tasks),
             sort = sort,
@@ -125,6 +127,12 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
 
     suspend fun createList(name: String): TaskListEntity? = runCatching { todo.createList(name) }.getOrNull()
     fun renameList(id: String, name: String) { viewModelScope.launch { todo.renameList(id, name) } }
+    fun createGroup(name: String) { viewModelScope.launch { runCatching { todo.createGroup(name) } } }
+    fun renameGroup(id: String, name: String) { viewModelScope.launch { todo.renameGroup(id, name) } }
+    /** Removes the group; its lists become ungrouped and keep their tasks. */
+    fun deleteGroup(id: String) { viewModelScope.launch { todo.deleteGroup(id) } }
+    fun setListGroup(listId: String, groupId: String?) { viewModelScope.launch { todo.setListGroup(listId, groupId) } }
+    fun toggleGroup(id: String, collapsed: Boolean) { viewModelScope.launch { todo.setGroupCollapsed(id, collapsed) } }
     fun moveList(id: String, delta: Int) { viewModelScope.launch { todo.moveListPosition(id, delta) } }
     fun deleteList(id: String, moveTasks: Boolean) {
         viewModelScope.launch {

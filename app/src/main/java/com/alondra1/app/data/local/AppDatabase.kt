@@ -12,8 +12,8 @@ import androidx.room.TypeConverters
  */
 @Database(
     entities = [TaskListEntity::class, TaskEntity::class, NoteEntity::class, EventEntity::class, OutboxEntity::class, SyncIssueEntity::class,
-        NoteFts::class, NoteFolderEntity::class, NoteAssetEntity::class],
-    version = 4,
+        NoteFts::class, NoteFolderEntity::class, NoteAssetEntity::class, ListGroupEntity::class, CompletionRecordEntity::class],
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -26,6 +26,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sync(): SyncDao
     abstract fun noteFolders(): NoteFolderDao
     abstract fun noteAssets(): NoteAssetDao
+    abstract fun listGroups(): ListGroupDao
+    abstract fun completions(): CompletionDao
 
     companion object {
         const val NAME = "alondra1.db"
@@ -75,7 +77,33 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        /**
+         * 4 -> 5: task parity with the shared contract (completion spec v1.1 §8.3): start date, repeat rule, steps and
+         * several reminders on tasks, list groups, and completion history. The single reminder of schema 4 becomes the
+         * first entry of the reminder list, with the id the sync mapper already used for it, so a synced reminder keeps
+         * its identity. Nothing is lost.
+         */
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                listOf(
+                    "ALTER TABLE `tasks` ADD COLUMN `startDate` TEXT",
+                    "ALTER TABLE `tasks` ADD COLUMN `recurrenceJson` TEXT",
+                    "ALTER TABLE `tasks` ADD COLUMN `stepsJson` TEXT NOT NULL DEFAULT '[]'",
+                    "ALTER TABLE `tasks` ADD COLUMN `remindersJson` TEXT NOT NULL DEFAULT '[]'",
+                    "UPDATE `tasks` SET `remindersJson` = '[{\"id\":\"' || substr(`id` || '-r', 1, 64) || '\",\"at\":\"' || " +
+                        "CASE WHEN length(`reminderAt`) = 16 THEN `reminderAt` || ':00' ELSE substr(`reminderAt`, 1, 19) END || '\"}]', " +
+                        "`reminderAt` = NULL WHERE `reminderAt` IS NOT NULL",
+                    "ALTER TABLE `task_lists` ADD COLUMN `groupId` TEXT",
+                    "CREATE TABLE IF NOT EXISTS `list_groups` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `position` REAL NOT NULL, `collapsed` INTEGER NOT NULL, `createdUtc` INTEGER NOT NULL, `modifiedUtc` INTEGER NOT NULL, `deletedUtc` INTEGER, `serverVersion` INTEGER, `remoteJson` TEXT, PRIMARY KEY(`id`))",
+                    "CREATE INDEX IF NOT EXISTS `index_list_groups_deletedUtc` ON `list_groups` (`deletedUtc`)",
+                    "CREATE TABLE IF NOT EXISTS `completion_records` (`id` TEXT NOT NULL, `taskId` TEXT NOT NULL, `title` TEXT NOT NULL, `listId` TEXT NOT NULL, `completedUtc` INTEGER NOT NULL, `occurrenceDate` TEXT, `sent` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                    "CREATE INDEX IF NOT EXISTS `index_completion_records_taskId` ON `completion_records` (`taskId`)",
+                    "CREATE INDEX IF NOT EXISTS `index_completion_records_sent` ON `completion_records` (`sent`)",
+                ).forEach(db::execSQL)
+            }
+        }
+
+        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         fun build(context: Context, name: String? = NAME): AppDatabase {
             val builder = if (name == null) {

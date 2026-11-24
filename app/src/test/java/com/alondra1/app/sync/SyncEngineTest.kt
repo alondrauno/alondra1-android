@@ -216,6 +216,52 @@ class SyncEngineTest {
         assertEquals(SyncState.OFFLINE, engine.syncNow().state)
         assertEquals(1, c.db.sync().outbox().size)
     }
+
+    @Test fun listGroupsSyncBeforeTheirLists() = runBlocking<Unit> {
+        val group = c.todo.createGroup("Home")
+        val list = c.todo.createList("Groceries")
+        c.todo.setListGroup(list.id, group.id)
+        engine.enable(tenant)
+        val mutations = pushes.flatMap { it["mutations"]!!.jsonArray.map { m -> m.jsonObject } }
+        val types = mutations.map { it["resource_type"]!!.jsonPrimitive.content }
+        assertTrue(types.toString(), types.indexOf("group") in 0 until types.indexOf("list"))
+        val groupWire = mutations.first { it["resource_type"]!!.jsonPrimitive.content == "group" }["resource"]!!.jsonObject
+        assertEquals("Home", groupWire["name"]!!.jsonPrimitive.content)
+        assertTrue("collapsed is device-local", groupWire["collapsed"] == null)
+        val listWire = mutations.first { it["resource_id"]!!.jsonPrimitive.content == list.id }["resource"]!!.jsonObject
+        assertEquals(group.id, listWire["groupId"]!!.jsonPrimitive.content)
+        assertEquals(1L, c.db.listGroups().get(group.id)!!.serverVersion)
+    }
+
+    @Test fun completionRecordsTravelWithTheCompletingChangeOnce() = runBlocking<Unit> {
+        bootstrapItems = "[${listRecord("d", 1, true)}]"
+        val task = c.todo.addTask("Pay rent", dueDate = java.time.LocalDate.parse("2026-11-30"))
+        c.todo.setRecurrence(task.id, com.alondra1.app.domain.RecurrenceRule(com.alondra1.app.domain.Frequency.Monthly))
+        engine.enable(tenant) // the task is created in the cloud (version 1)
+        pushes.clear()
+        c.todo.setCompleted(task.id, true)
+        engine.syncNow()
+        val patch = pushes.flatMap { it["mutations"]!!.jsonArray.map { m -> m.jsonObject } }.single { it["resource_id"]!!.jsonPrimitive.content == task.id }
+        assertEquals("patch", patch["action"]!!.jsonPrimitive.content)
+        val completion = patch["append_completion"]!!.jsonObject
+        assertEquals(task.id, completion["taskId"]!!.jsonPrimitive.content)
+        assertEquals("2026-11-30", completion["occurrenceDate"]!!.jsonPrimitive.content)
+        assertTrue("marked sent once applied", c.db.completions().forTask(task.id).single().sent)
+        pushes.clear()
+        engine.syncNow()
+        assertTrue("nothing is sent twice", pushes.none { p -> p["mutations"]!!.jsonArray.any { it.jsonObject["append_completion"] != null } })
+    }
+
+    @Test fun completionsFromOtherDevicesAreKept() = runBlocking<Unit> {
+        bootstrapItems = "[${listRecord("d", 1, true)}]"
+        engine.enable(tenant)
+        changes = """[{"seq":5,"resource_type":"completion","resource_id":"c-other","action":"upsert",
+            "record":{"id":"c-other","taskId":"t-other","title":"Water plants","listId":"l1","completedUtc":"2026-11-22T18:00:00Z","occurrenceDate":"2026-11-22"}}]"""
+        engine.syncNow()
+        val record = c.db.completions().forTask("t-other").single()
+        assertEquals("Water plants", record.title)
+        assertTrue(record.sent)
+    }
 }
 
 private suspend fun com.alondra1.app.data.local.SyncDao.observeIssuesOnce() = observeIssues().first()

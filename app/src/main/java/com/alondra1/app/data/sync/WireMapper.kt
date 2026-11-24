@@ -29,8 +29,8 @@ import java.time.format.DateTimeFormatter
 /**
  * Converts local records to the shared wire formats (contract/schemas: todo-v1, notes-v1, calendar-v1) and back.
  *
- * Outgoing objects start from the last server copy ([TaskEntity.remoteJson]) so fields this app does not edit yet
- * (recurrence, steps, attachments, start date, list groups) are sent back unchanged instead of being erased.
+ * Outgoing objects start from the last server copy ([TaskEntity.remoteJson]) so fields this app does not edit
+ * (attachments, unknown fields, unknown keys inside steps) are sent back unchanged instead of being erased.
  */
 object WireMapper {
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -65,13 +65,46 @@ object WireMapper {
         m.putOrRemove("dueDate", t.dueDate?.toString())
         m.putOrRemove("dueTime", t.dueTime?.let(::localTime))
         m.putOrRemove("myDayDate", t.myDayDate?.toString())
-        // Phase 1 edits one reminder; extra reminders from another device are kept after it.
-        val others = (m["reminders"] as? JsonArray)?.filter { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull != reminderId(t.id) }.orEmpty()
-        m["reminders"] = buildJsonArray {
-            t.reminderAt?.let { add(buildJsonObject { put("id", reminderId(t.id)); put("at", localDateTime(it)) }) }
-            others.forEach { add(stripReminderState(it)) }
-        }
+        m.putOrRemove("startDate", t.startDate?.toString())
+        val rule = t.recurrenceJson?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() }
+        if (rule != null) m["recurrence"] = rule else m.remove("recurrence")
+        m["subtasks"] = json.parseToJsonElement(t.stepsJson)
+        // Reminder definitions only (id, at): delivery state is per device and never synced.
+        m["reminders"] = buildJsonArray { (json.parseToJsonElement(t.remindersJson) as? JsonArray).orEmpty().forEach { add(stripReminderState(it)) } }
         return JsonObject(m)
+    }
+
+    fun group(g: com.alondra1.app.data.local.ListGroupEntity): JsonObject {
+        val m = base(g.remoteJson)
+        m["id"] = JsonPrimitive(g.id)
+        m["name"] = JsonPrimitive(g.name)
+        m["position"] = JsonPrimitive(g.position)
+        m.remove("collapsed") // device-local presentation preference
+        return JsonObject(m)
+    }
+
+    fun groupFrom(o: JsonObject, version: Long, local: com.alondra1.app.data.local.ListGroupEntity?): com.alondra1.app.data.local.ListGroupEntity =
+        com.alondra1.app.data.local.ListGroupEntity(
+            id = o.str("id")!!, name = o.str("name").orEmpty().ifBlank { "Group" },
+            position = (o["position"] as? JsonPrimitive)?.doubleOrNull ?: 0.0,
+            collapsed = local?.collapsed ?: false,
+            createdUtc = local?.createdUtc ?: Instant.now(), modifiedUtc = Instant.now(),
+            serverVersion = version, remoteJson = o.toString(),
+        )
+
+    /** A completion record for append_completion (contract CompletionRecord). */
+    fun completion(c: com.alondra1.app.data.local.CompletionRecordEntity): JsonObject = buildJsonObject {
+        put("id", c.id); put("taskId", c.taskId); put("title", c.title); put("listId", c.listId)
+        put("completedUtc", utc(c.completedUtc))
+        c.occurrenceDate?.let { put("occurrenceDate", it.toString()) }
+    }
+
+    fun completionFrom(o: JsonObject): com.alondra1.app.data.local.CompletionRecordEntity? {
+        val id = o.str("id") ?: return null
+        return com.alondra1.app.data.local.CompletionRecordEntity(
+            id = id, taskId = o.str("taskId") ?: return null, title = o.str("title").orEmpty(), listId = o.str("listId").orEmpty(),
+            completedUtc = instant(o.str("completedUtc")) ?: return null, occurrenceDate = o.str("occurrenceDate")?.let(LocalDate::parse), sent = true,
+        )
     }
 
     /** Reminder delivery state is per device and never synced. */
@@ -86,6 +119,7 @@ object WireMapper {
         m["isDefault"] = JsonPrimitive(l.isDefault)
         m["createdUtc"] = JsonPrimitive(utc(l.createdUtc))
         m.putOrRemove("color", l.color)
+        m.putOrRemove("groupId", l.groupId)
         return JsonObject(m)
     }
 
@@ -139,7 +173,6 @@ object WireMapper {
     private fun instant(value: String?): Instant? = value?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant() }.getOrNull() }
 
     fun taskFrom(o: JsonObject, version: Long, local: TaskEntity?): TaskEntity {
-        val reminder = (o["reminders"] as? JsonArray)?.firstOrNull()?.jsonObject?.str("at")?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
         val now = Instant.now()
         return TaskEntity(
             id = o.str("id")!!,
@@ -155,7 +188,11 @@ object WireMapper {
             dueDate = o.str("dueDate")?.let(LocalDate::parse),
             dueTime = o.str("dueTime")?.let { LocalTime.parse(it) },
             myDayDate = o.str("myDayDate")?.let(LocalDate::parse),
-            reminderAt = reminder,
+            reminderAt = null,
+            startDate = o.str("startDate")?.let(LocalDate::parse),
+            recurrenceJson = (o["recurrence"] as? JsonObject)?.toString(),
+            stepsJson = (o["subtasks"] as? JsonArray)?.toString() ?: "[]",
+            remindersJson = (o["reminders"] as? JsonArray)?.let { a -> JsonArray(a.map(::stripReminderState)).toString() } ?: "[]",
             sourceNoteId = local?.sourceNoteId,
             deletedUtc = null,
             remoteJson = o.toString(),
@@ -169,6 +206,7 @@ object WireMapper {
         color = o.str("color"),
         position = (o["position"] as? JsonPrimitive)?.doubleOrNull ?: 0.0,
         isDefault = o.bool("isDefault"),
+        groupId = o.str("groupId"),
         createdUtc = instant(o.str("createdUtc")) ?: local?.createdUtc ?: Instant.now(),
         modifiedUtc = Instant.now(),
         deletedUtc = null,

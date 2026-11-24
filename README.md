@@ -6,7 +6,7 @@
 
 Personal **To-do**, **Notes** and **Calendar** for Android phones and tablets. Local-first: everything works offline, with no account, and stays on the device. Optional paid **Cloud Sync** uses the Alondra1 backend ([alondra1-backend](https://github.com/nikita4sea/alondra1-backend)); see [Cloud account and sync](#cloud-account-and-sync).
 
-Phase 1 scope and rules: [docs/CLIENT-REQUIREMENTS.md](docs/CLIENT-REQUIREMENTS.md). Every feature with its code, tests and status: [docs/FEATURE-MAP.md](docs/FEATURE-MAP.md). Not in this app: Mail, Contacts, task steps and attachments, recurring tasks and events, system-calendar access.
+Phase 1 scope and rules: [docs/CLIENT-REQUIREMENTS.md](docs/CLIENT-REQUIREMENTS.md). Every feature with its code, tests and status: [docs/FEATURE-MAP.md](docs/FEATURE-MAP.md). Not in this app: Mail, Contacts, task attachments (kept unchanged when synced), recurring events, system-calendar access. Task steps, repeats, start dates, several reminders, list groups and completion history work as on Windows (completion spec v1.1 §8.3).
 
 ## Build and run
 
