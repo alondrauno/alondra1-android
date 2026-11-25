@@ -55,9 +55,9 @@ android {
             versionNameSuffix = "-dev"
             resValue("string", "app_name", "Alondra1 Dev")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
-            buildConfigField("String", "API_ORIGIN", "\"https://api.dev.alondra1.com\"")
-            buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.dev.alondra1.com/manifest.json\"")
-            buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.dev.alondra1.com/manifest.json\"")
+            buildConfigField("String", "API_ORIGIN", "\"https://api.alondra1.dev\"")
+            buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.alondra1.dev/manifest.json\"")
+            buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.alondra1.dev/manifest.json\"")
             buildConfigField("String", "DISCOVERY_TRUST", "\"{\\\"keys\\\": []}\"")
         }
     }

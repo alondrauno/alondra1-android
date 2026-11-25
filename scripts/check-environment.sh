@@ -8,11 +8,11 @@ env="${1:?prod or dev}"; artifact="${2:?aab or apk}"
 import sys, zipfile
 env, artifact = sys.argv[1], sys.argv[2]
 if env == "prod":
-    forbidden = ["https://api.dev.alondra1.com", "https://config.dev.alondra1.com", "https://config2.dev.alondra1.com", "http://10.0.2.2"]
+    forbidden = ["https://api.alondra1.dev", "https://config.alondra1.dev", "https://config2.alondra1.dev", "http://10.0.2.2"]
     required = "https://api.alondra1.com"
 else:
     forbidden = ["https://api.alondra1.com", "https://config.alondra1.com", "https://config2.alondra1.com"]
-    required = "https://api.dev.alondra1.com"
+    required = "https://api.alondra1.dev"
 with zipfile.ZipFile(artifact) as z:
     dex = [z.read(n) for n in z.namelist() if n.endswith(".dex")]
 if not dex:

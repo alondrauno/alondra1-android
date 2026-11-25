@@ -50,7 +50,7 @@ object DiscoveryManifest {
     private val idPattern = Regex("^[a-z0-9-]{1,32}$")
     private val regionPattern = Regex("^[a-z0-9]{2,16}$")
     private val prodHost = Regex("""^(?:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.)?api\.alondra1\.com$""")
-    private val devHost = Regex("""^(?:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.)?api\.dev\.alondra1\.com$""")
+    private val devHost = Regex("""^(?:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.)?api\.alondra1\.dev$""")
     private val base64Chars = Regex("^[A-Za-z0-9+/]*={0,2}$")
 
     fun hostAllowed(environment: String, host: String): Boolean = when (environment) {

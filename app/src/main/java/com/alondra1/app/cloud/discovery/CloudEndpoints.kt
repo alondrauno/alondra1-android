@@ -38,7 +38,7 @@ object BuildEnvironment {
         val host = uri.host?.lowercase() ?: return false
         if (host == "127.0.0.1" || host == "localhost" || host == "10.0.2.2") return true
         if (uri.scheme != "https") return false
-        val devHost = host == "dev.alondra1.com" || host.endsWith(".dev.alondra1.com")
+        val devHost = host == "alondra1.dev" || host.endsWith(".alondra1.dev")
         val prodHost = !devHost && (host == "alondra1.com" || host.endsWith(".alondra1.com"))
         return if (environment == "dev") !prodHost else !devHost
     }
