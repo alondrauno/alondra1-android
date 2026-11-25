@@ -173,8 +173,9 @@ private fun Tile(id: String, current: BackgroundSettings, onPick: () -> Unit) {
     val context = LocalContext.current
     val selected = current.image == id && (current.enabled || id == BackgroundCatalog.NONE)
     val thumb by produceState<ImageBitmap?>(initialValue = null, id, current.customPath) {
-        value = if (id == BackgroundCatalog.NONE) null
+        val decoded = if (id == BackgroundCatalog.NONE) null
         else withContext(Dispatchers.IO) { runCatching { BackgroundPictures.decode(context, id, current.customPath, 240)?.asImageBitmap() }.getOrNull() }
+        value = decoded
     }
     Column(
         Modifier.width(92.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onPick).testTag("background:$id"),
