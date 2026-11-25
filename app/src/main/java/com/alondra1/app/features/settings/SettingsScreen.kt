@@ -51,7 +51,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, onBackground: () -> Unit = {}) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -70,6 +70,15 @@ fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
             Section("General") {
                 Choice("Theme", settings.theme.label, ThemeMode.entries.map { it.label to { scope.launch { container.settings.setTheme(it) }; Unit } })
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("Background") },
+                    supportingContent = {
+                        val bg = settings.background
+                        Text(if (!bg.enabled) "Off" else com.alondra1.app.data.settings.BackgroundCatalog.name(bg.image))
+                    },
+                    modifier = Modifier.clickable(onClick = onBackground).testTag("backgroundSettings"),
+                )
                 HorizontalDivider()
                 Choice("First day of week",
                     settings.firstDayOfWeek?.getDisplayName(TextStyle.FULL, Locale.getDefault()) ?: "Language default",

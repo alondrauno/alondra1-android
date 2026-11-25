@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.alondra1.app.domain.TaskSort
@@ -28,6 +29,7 @@ data class Settings(
     val onboardingComplete: Boolean = false,
     val taskSort: TaskSort = TaskSort.DUE_DATE,
     val privateNotifications: Boolean = true,
+    val background: BackgroundSettings = BackgroundSettings(),
 )
 
 private val Context.settingsStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -44,6 +46,16 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
         val onboarding = booleanPreferencesKey("onboarding_complete")
         val sort = stringPreferencesKey("task_sort")
         val privateNotifications = booleanPreferencesKey("private_notifications")
+        val bgEnabled = booleanPreferencesKey("background_enabled")
+        val bgImage = stringPreferencesKey("background_image")
+        val bgCustomPath = stringPreferencesKey("background_custom_path")
+        val bgOpacity = floatPreferencesKey("background_opacity")
+        val bgBlur = floatPreferencesKey("background_blur")
+        val bgDesaturation = floatPreferencesKey("background_desaturation")
+        val bgBrightness = floatPreferencesKey("background_brightness")
+        val bgOverlay = floatPreferencesKey("background_overlay")
+        val bgFit = stringPreferencesKey("background_fit")
+        val bgPosition = stringPreferencesKey("background_position")
     }
 
     val settings: Flow<Settings> = store.data
@@ -58,6 +70,18 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
                 onboardingComplete = p[Keys.onboarding] ?: false,
                 taskSort = enumOr(p[Keys.sort], TaskSort.DUE_DATE),
                 privateNotifications = p[Keys.privateNotifications] ?: true,
+                background = BackgroundSettings(
+                    enabled = p[Keys.bgEnabled] ?: true,
+                    image = p[Keys.bgImage] ?: BackgroundCatalog.DEFAULT,
+                    customPath = p[Keys.bgCustomPath],
+                    opacity = p[Keys.bgOpacity] ?: BackgroundSettings.DEFAULT_OPACITY,
+                    blur = p[Keys.bgBlur] ?: BackgroundSettings.DEFAULT_BLUR,
+                    desaturation = p[Keys.bgDesaturation] ?: BackgroundSettings.DEFAULT_DESATURATION,
+                    brightness = p[Keys.bgBrightness] ?: 0f,
+                    overlay = p[Keys.bgOverlay] ?: 0f,
+                    fit = enumOr(p[Keys.bgFit], BackgroundFit.COVER),
+                    position = enumOr(p[Keys.bgPosition], BackgroundPosition.CENTER),
+                ).normalized(),
             )
         }
 
@@ -69,6 +93,19 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
     suspend fun setOnboardingComplete() = store.edit { it[Keys.onboarding] = true }
     suspend fun setTaskSort(sort: TaskSort) = store.edit { it[Keys.sort] = sort.name }
     suspend fun setPrivateNotifications(value: Boolean) = store.edit { it[Keys.privateNotifications] = value }
+    suspend fun setBackground(value: BackgroundSettings) = store.edit { p ->
+        val b = value.normalized()
+        p[Keys.bgEnabled] = b.enabled
+        p[Keys.bgImage] = b.image
+        if (b.customPath == null) p.remove(Keys.bgCustomPath) else p[Keys.bgCustomPath] = b.customPath
+        p[Keys.bgOpacity] = b.opacity
+        p[Keys.bgBlur] = b.blur
+        p[Keys.bgDesaturation] = b.desaturation
+        p[Keys.bgBrightness] = b.brightness
+        p[Keys.bgOverlay] = b.overlay
+        p[Keys.bgFit] = b.fit.name
+        p[Keys.bgPosition] = b.position.name
+    }
     suspend fun clear() = store.edit { it.clear() }
 
     private inline fun <reified E : Enum<E>> enumOr(value: String?, fallback: E): E =

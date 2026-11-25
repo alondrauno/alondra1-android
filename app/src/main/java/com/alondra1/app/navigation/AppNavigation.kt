@@ -1,6 +1,7 @@
 package com.alondra1.app.navigation
 
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -97,6 +98,7 @@ object Routes {
     const val NEW_EVENT = "event-new?date={date}"
     const val SEARCH = "search"
     const val SETTINGS = "settings"
+    const val BACKGROUND = "settings/background"
     const val NOTE_CONFLICT = "note-conflict/{issue}"
     fun noteConflict(issueId: Long) = "note-conflict/$issueId"
     fun task(id: String) = "task/$id"
@@ -125,18 +127,22 @@ fun Alondra1Root(
     Alondra1Theme(loaded.theme) {
         val snackbar = remember { SnackbarHostState() }
         CompositionLocalProvider(LocalContainer provides container, LocalSnackbar provides snackbar, LocalTimeFormat provides loaded.timeFormat) {
-            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                if (!loaded.onboardingComplete) {
-                    val scope = rememberCoroutineScope()
-                    WelcomeScreen { examples ->
-                        scope.launch {
-                            container.todo.ensureDefaultList()
-                            if (examples) container.todo.addExamples()
-                            container.settings.setOnboardingComplete()
+            // The workspace background is drawn on the plain background color, behind every screen.
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                if (loaded.onboardingComplete) com.alondra1.app.design.WorkspaceBackground(loaded.background)
+                Surface(Modifier.fillMaxSize(), color = androidx.compose.ui.graphics.Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
+                    if (!loaded.onboardingComplete) {
+                        val scope = rememberCoroutineScope()
+                        WelcomeScreen { examples ->
+                            scope.launch {
+                                container.todo.ensureDefaultList()
+                                if (examples) container.todo.addExamples()
+                                container.settings.setOnboardingComplete()
+                            }
                         }
+                    } else {
+                        AppScaffold(container, loaded, snackbar, newIntents, accountSection)
                     }
-                } else {
-                    AppScaffold(container, loaded, snackbar, newIntents, accountSection)
                 }
             }
         }
@@ -173,6 +179,8 @@ private fun AppScaffold(
     }
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent, // the root draws the background and picture
+        contentColor = MaterialTheme.colorScheme.onBackground,
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = if (topLevel && !useRail) WindowInsets(0) else WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
         bottomBar = {
@@ -311,7 +319,10 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
                 onNote = { nav.navigate(Routes.note(it)) }, onEvent = { nav.navigate(Routes.event(it)) })
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { nav.popBackStack() }, accountSection = accountSection)
+            SettingsScreen(onBack = { nav.popBackStack() }, accountSection = accountSection, onBackground = { nav.navigate(Routes.BACKGROUND) })
+        }
+        composable(Routes.BACKGROUND) {
+            com.alondra1.app.features.settings.BackgroundScreen(onBack = { nav.popBackStack() })
         }
         composable(Routes.NOTE_CONFLICT, arguments = listOf(navArgument("issue") { type = NavType.LongType })) { entry ->
             com.alondra1.app.features.notes.NoteConflictScreen(container, entry.arguments?.getLong("issue") ?: 0L, onClose = { nav.popBackStack() },

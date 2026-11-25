@@ -218,6 +218,8 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
     val fmt = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent, // the workspace background shows through
+        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = {

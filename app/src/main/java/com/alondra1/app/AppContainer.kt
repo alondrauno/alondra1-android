@@ -33,6 +33,8 @@ class AppContainer(
     assetsDir: java.io.File = java.io.File(System.getProperty("java.io.tmpdir"), "alondra1-notes-assets"),
     /** API endpoints (signed discovery and failover, or a fixed development address); null without cloud. */
     val endpoints: com.alondra1.app.cloud.discovery.CloudEndpoints? = null,
+    /** Where the user's own background picture is stored (files/backgrounds in the app). */
+    backgroundsDir: java.io.File = java.io.File(System.getProperty("java.io.tmpdir"), "alondra1-backgrounds"),
 ) {
     class Cloud(val session: SessionStore, val api: ApiClient, val account: AccountRepository, val engine: SyncEngine, val onSyncConfigured: (Boolean) -> Unit)
 
@@ -43,6 +45,7 @@ class AppContainer(
     val noteAssets = com.alondra1.app.data.repository.NoteAssets(db, assetsDir, time)
     val calendar = CalendarRepository(db, time, reminders, changes)
     val search = SearchRepository(db)
+    val backgrounds = com.alondra1.app.data.settings.BackgroundStore(backgroundsDir)
 
     suspend fun rescheduleAllReminders() {
         db.tasks().withReminders().forEach(reminders::syncTask)
@@ -59,6 +62,7 @@ class AppContainer(
             db.maintenance().clearEvents()
         }
         settings.clear()
+        backgrounds.deleteAll()
         todo.ensureDefaultList()
     }
 
@@ -68,10 +72,11 @@ class AppContainer(
             val db = AppDatabase.build(context)
             val reminders = WorkManagerReminderScheduler(context, time)
             val assetsDir = java.io.File(context.filesDir, "notes-assets")
+            val backgroundsDir = java.io.File(context.filesDir, "backgrounds")
             // A build whose fixed address belongs to the other environment, or whose bundled endpoint list has expired
             // with nothing verified since, has no cloud: local features are unaffected.
             val endpoints = com.alondra1.app.cloud.discovery.CloudEndpoints.create(context)
-                ?: return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), assetsDir = assetsDir)
+                ?: return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), assetsDir = assetsDir, backgroundsDir = backgroundsDir)
             val session = SessionStore.create(context)
             val api = ApiClient(endpoints.baseUrl, session, endpoints.http)
             val engine = SyncEngine(db, api, session, time, reminders, java.io.File(context.filesDir, "backups"),
@@ -81,7 +86,7 @@ class AppContainer(
                 if (enabled) { SyncWorker.schedulePeriodic(context); SyncWorker.requestSoon(context) } else SyncWorker.cancel(context)
             }
             return AppContainer(db = db, time = time, reminders = reminders, settings = SettingsRepository(context), changes = recorder, cloud = cloud,
-                assetsDir = assetsDir, endpoints = endpoints)
+                assetsDir = assetsDir, endpoints = endpoints, backgroundsDir = backgroundsDir)
         }
     }
 }
