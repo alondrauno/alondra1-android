@@ -42,7 +42,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -172,9 +172,10 @@ private fun signedPercent(v: Float): String {
 private fun Tile(id: String, current: BackgroundSettings, onPick: () -> Unit) {
     val context = LocalContext.current
     val selected = current.image == id && (current.enabled || id == BackgroundCatalog.NONE)
-    val thumb by produceState<ImageBitmap?>(null, id, current.customPath) {
+    var thumb by remember(id, current.customPath) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(id, current.customPath) {
         if (id != BackgroundCatalog.NONE) {
-            value = withContext(Dispatchers.IO) { runCatching { BackgroundPictures.decode(context, id, current.customPath, 240)?.asImageBitmap() }.getOrNull() }
+            thumb = withContext(Dispatchers.IO) { runCatching { BackgroundPictures.decode(context, id, current.customPath, 240)?.asImageBitmap() }.getOrNull() }
         }
     }
     Column(

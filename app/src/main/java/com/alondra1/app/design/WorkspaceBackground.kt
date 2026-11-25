@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -59,8 +62,9 @@ fun WorkspaceBackground(settings: BackgroundSettings, modifier: Modifier = Modif
     val config = LocalConfiguration.current
     val target = (max(config.screenWidthDp, config.screenHeightDp) * context.resources.displayMetrics.density).toInt().coerceIn(720, 2560)
     val key = listOf(s.image, s.customPath, s.desaturation, s.brightness, dark, target)
-    val picture by produceState<ImageBitmap?>(null, key) {
-        value = withContext(Dispatchers.Default) { runCatching { BackgroundPictures.processed(context, s, dark, target) }.getOrNull() }
+    var picture by remember(key) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(key) {
+        picture = withContext(Dispatchers.Default) { runCatching { BackgroundPictures.processed(context, s, dark, target) }.getOrNull() }
     }
 
     val image = picture ?: return
