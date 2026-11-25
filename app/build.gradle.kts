@@ -58,7 +58,8 @@ android {
             buildConfigField("String", "API_ORIGIN", "\"https://api.alondra1.dev\"")
             buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.alondra1.dev/manifest.json\"")
             buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.alondra1.dev/manifest.json\"")
-            buildConfigField("String", "DISCOVERY_TRUST", "\"{\\\"keys\\\": []}\"")
+            // Public keys of the dev discovery signer (alondra1-infra discovery/trust/dev.json).
+            buildConfigField("String", "DISCOVERY_TRUST", "\"{\\\"keys\\\":[{\\\"key_id\\\":\\\"dev-2026-1\\\",\\\"environment\\\":\\\"dev\\\",\\\"public_key\\\":\\\"9866fABqc4F5q2wLZ2WgMZ0KF5AUZwXepQo5KYqGCSw=\\\"}]}\"")
         }
     }
 
