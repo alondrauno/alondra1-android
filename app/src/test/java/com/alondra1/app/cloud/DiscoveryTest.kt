@@ -72,7 +72,8 @@ class DiscoveryTest {
     }
 
     @Test fun environmentsNeverMix() {
-        assertTrue(DiscoveryManifest.hostAllowed("prod", "eu1.api.alondra1.com"))
+        assertTrue(DiscoveryManifest.hostAllowed("prod", "eu1-api.alondra1.com"))
+        assertFalse(DiscoveryManifest.hostAllowed("prod", "eu1.api.alondra1.com"))
         assertFalse(DiscoveryManifest.hostAllowed("prod", "api.alondra1.dev"))
         assertFalse(DiscoveryManifest.hostAllowed("dev", "api.alondra1.com"))
         assertTrue(BuildEnvironment.allowsAddress("http://10.0.2.2:8080", "prod"))
