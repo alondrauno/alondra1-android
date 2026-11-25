@@ -59,10 +59,10 @@ fun WorkspaceBackground(settings: BackgroundSettings, modifier: Modifier = Modif
     val config = LocalConfiguration.current
     val target = (max(config.screenWidthDp, config.screenHeightDp) * context.resources.displayMetrics.density).toInt().coerceIn(720, 2560)
     val key = listOf(s.image, s.customPath, s.desaturation, s.brightness, dark, target)
-    val picture by produceState<ImageBitmap?>(initialValue = null, key) {
-        val processed = withContext(Dispatchers.Default) { runCatching { BackgroundPictures.processed(context, s, dark, target) }.getOrNull() }
-        value = processed
+    val picture by produceState<ImageBitmap?>(null, key) {
+        value = withContext(Dispatchers.Default) { runCatching { BackgroundPictures.processed(context, s, dark, target) }.getOrNull() }
     }
+
     val image = picture ?: return
     Box(modifier.fillMaxSize().clearAndSetSemantics { }) {
         Image(

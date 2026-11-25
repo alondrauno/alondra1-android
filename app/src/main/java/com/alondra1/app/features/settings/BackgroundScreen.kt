@@ -172,10 +172,10 @@ private fun signedPercent(v: Float): String {
 private fun Tile(id: String, current: BackgroundSettings, onPick: () -> Unit) {
     val context = LocalContext.current
     val selected = current.image == id && (current.enabled || id == BackgroundCatalog.NONE)
-    val thumb by produceState<ImageBitmap?>(initialValue = null, id, current.customPath) {
-        val decoded = if (id == BackgroundCatalog.NONE) null
-        else withContext(Dispatchers.IO) { runCatching { BackgroundPictures.decode(context, id, current.customPath, 240)?.asImageBitmap() }.getOrNull() }
-        value = decoded
+    val thumb by produceState<ImageBitmap?>(null, id, current.customPath) {
+        if (id != BackgroundCatalog.NONE) {
+            value = withContext(Dispatchers.IO) { runCatching { BackgroundPictures.decode(context, id, current.customPath, 240)?.asImageBitmap() }.getOrNull() }
+        }
     }
     Column(
         Modifier.width(92.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onPick).testTag("background:$id"),
