@@ -380,9 +380,14 @@ class SyncEngineTest {
         assertEquals(null, file.lastError)
     }
 
-    @Test fun aBusyServerKeepsTheFileAndTheTaskQueued() = runBlocking<Unit> {
+    @Test fun aBusyServerKeepsTheFileAndTheTaskQueued() = busyKeepsQueued(503)
+
+    /** 408 UPLOAD_INCOMPLETE: the transfer broke off; retried like a busy server. */
+    @Test fun anIncompleteUploadKeepsTheFileAndTheTaskQueued() = busyKeepsQueued(408)
+
+    private fun busyKeepsQueued(status: Int) = runBlocking<Unit> {
         val files = engineWithFiles()
-        fileUploadStatus = 503
+        fileUploadStatus = status
         val a = files.store("%PDF-1.7 busy".byteInputStream(), "busy.pdf", null)
         val task = c.todo.addTask("Busy", attachments = listOf(a))
         engine.enable(tenant)

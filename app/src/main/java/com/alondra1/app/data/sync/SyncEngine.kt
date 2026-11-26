@@ -206,7 +206,7 @@ class SyncEngine(
                 session.setSync(session.state.value.tenantId, false)
                 set(SyncState.ERROR_PERMANENT, "You no longer have access to this space. Sync stopped; your local data is kept.")
             }
-            e.status >= 500 || e.status == 429 -> set(SyncState.ERROR_RETRYABLE, "The cloud is busy. Alondra1 will retry.")
+            e.status >= 500 || e.status == 429 || e.status == 408 -> set(SyncState.ERROR_RETRYABLE, "The cloud is busy. Alondra1 will retry.")
             else -> set(SyncState.ERROR_PERMANENT, e.message)
         }
         return _status.value
@@ -273,7 +273,8 @@ class SyncEngine(
                 api.putBytes("/v1/task-files/$sha", bytes, "application/octet-stream", tenantId)
                 db.taskFiles().markUploaded(sha)
             } catch (e: ApiException) {
-                if (e.isNetwork || e.status == 401 || e.status == 403 || e.status >= 500 || e.status == 429) throw e
+                // 408 UPLOAD_INCOMPLETE: the transfer broke off; retried like 429/503, never a permanent failure.
+                if (e.isNetwork || e.status == 401 || e.status == 403 || e.status >= 500 || e.status == 429 || e.status == 408) throw e
                 db.taskFiles().markFailed(sha, e.message ?: "The file could not be uploaded.")
             }
         }
