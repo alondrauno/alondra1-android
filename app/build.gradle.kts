@@ -55,6 +55,8 @@ android {
             dimension = "environment"
             resValue("string", "app_name", "Alondra1")
             buildConfigField("String", "ENVIRONMENT", "\"prod\"")
+            // No public support channel yet in prod: Settings shows no feedback link.
+            buildConfigField("String", "FEEDBACK_URL", "\"\"")
             buildConfigField("String", "API_ORIGIN", "\"https://api.alondra1.com\"")
             buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.alondra1.com/manifest.json\"")
             buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.alondra1.com/manifest.json\"")
@@ -68,6 +70,8 @@ android {
             resValue("string", "app_name", "Alondra1 Dev")
             if (System.getenv("ALONDRA1_DEV_KEYSTORE_FILE") != null) signingConfig = signingConfigs.getByName("dev")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
+            // Testers' feedback: the public issue form of alondra1-www (owner decision 2026-11-26).
+            buildConfigField("String", "FEEDBACK_URL", "\"https://github.com/alondrauno/alondra1-www/issues/new/choose\"")
             buildConfigField("String", "API_ORIGIN", "\"https://api.alondra1.dev\"")
             buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.alondra1.dev/manifest.json\"")
             buildConfigField("String", "DISCOVERY_MIRROR", "\"https://config2.alondra1.dev/manifest.json\"")

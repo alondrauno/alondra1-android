@@ -212,6 +212,7 @@ Code: `features/settings/SettingsScreen.kt`, `data/settings/SettingsRepository.k
 | SET-PRIV-02 | No OS cloud backup; device-to-device transfer of data but not tokens | Done | |
 | SET-PRIV-03 | No analytics, crash upload or ads; free builds make no network request | Done | |
 | SET-ACC-01 | Accessibility: TalkBack labels, 200 % font tested | Done | Robolectric test at 200 %. |
+| SET-ABOUT-01 | About: version and environment, Copy diagnostics (no email address, ids or contents), Send feedback on dev (`BuildConfig.FEEDBACK_URL`, the public alondra1-www issue form; empty in prod) | Done | `features/settings/Diagnostics.kt`, `AppFlowsTest.aboutShowsVersionEnvironmentDiagnosticsAndFeedback`. |
 
 ## 9. Build and quality (`OPS`)
 

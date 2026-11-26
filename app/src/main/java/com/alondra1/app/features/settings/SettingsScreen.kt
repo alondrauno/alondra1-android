@@ -1,5 +1,8 @@
 package com.alondra1.app.features.settings
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
 import android.content.Intent
@@ -57,6 +60,9 @@ fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, o
     val container = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
+    var diagnosticsNote by remember { mutableStateOf("Version, environment and sync state. No email address, tasks or notes.") }
     val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = com.alondra1.app.data.settings.Settings())
     val lists by container.todo.observeLists().collectAsStateWithLifecycle(initialValue = emptyList())
     var notificationsAllowed by remember { mutableStateOf(Notifications.canPost(context)) }
@@ -140,7 +146,30 @@ fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, o
             }
 
             Section("About") {
-                ListItem(headlineContent = { Text("Alondra1 for Android") }, supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}") })
+                ListItem(
+                    headlineContent = { Text("Alondra1 for Android") },
+                    supportingContent = { Text("Version ${BuildConfig.VERSION_NAME} · ${Diagnostics.environmentLabel()}") },
+                    modifier = Modifier.testTag("aboutVersion"),
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("Copy diagnostics") },
+                    supportingContent = { Text(diagnosticsNote) },
+                    modifier = Modifier.clickable {
+                        scope.launch {
+                            clipboard.setText(AnnotatedString(Diagnostics.collect(container)))
+                            diagnosticsNote = "Copied. Paste them into your feedback."
+                        }
+                    }.testTag("copyDiagnostics"),
+                )
+                if (Diagnostics.feedbackUrl.isNotEmpty()) {
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("Send feedback") },
+                        supportingContent = { Text("Opens the public feedback page on GitHub. Never include personal data or sign-in codes.") },
+                        modifier = Modifier.clickable { uriHandler.openUri(Diagnostics.feedbackUrl) }.testTag("sendFeedback"),
+                    )
+                }
             }
         }
     }

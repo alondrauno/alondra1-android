@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -222,5 +223,21 @@ class AppFlowsTest {
         rule.onNodeWithTag("composer").assertIsDisplayed()
         rule.onNodeWithTag("bottomNav").assertIsDisplayed()
         RuntimeEnvironment.setFontScale(1.0f)
+    }
+
+    /** Dev-only spec §1.1 item 8: version and environment, diagnostics without personal data, feedback on dev only. */
+    @Test fun aboutShowsVersionEnvironmentDiagnosticsAndFeedback() {
+        waitFor("tab:My Day")
+        rule.onNodeWithContentDescription("Account and settings").performClick()
+        waitFor("aboutVersion")
+        rule.onNodeWithTag("aboutVersion").performScrollTo().assertTextContains(com.alondra1.app.BuildConfig.VERSION_NAME, substring = true)
+        rule.onNodeWithTag("copyDiagnostics").performScrollTo().performClick()
+        waitForText("Copied. Paste them into your feedback.")
+        val copied = (RuntimeEnvironment.getApplication().getSystemService(android.content.ClipboardManager::class.java))
+            .primaryClip!!.getItemAt(0).text.toString()
+        assertTrue(copied, copied.startsWith("Alondra1 for Android ") && copied.contains("Changes waiting to sync: "))
+        assertTrue("no email address in diagnostics", !copied.contains("@"))
+        val dev = com.alondra1.app.BuildConfig.ENVIRONMENT == "dev"
+        assertEquals(dev, rule.onAllNodes(hasTestTag("sendFeedback")).fetchSemanticsNodes().isNotEmpty())
     }
 }
