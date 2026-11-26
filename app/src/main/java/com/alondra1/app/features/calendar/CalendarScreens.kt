@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -61,6 +63,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +74,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -191,10 +198,10 @@ fun CalendarScreen(
             IconButton(onClick = { viewModel.shiftMonth(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous month") }
             TextButton(onClick = { viewModel.goToday() }) { Text("Today") }
             IconButton(onClick = { viewModel.shiftMonth(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next month") }
-            IconButton(onClick = { viewModel.setMode(if (state.mode == CalendarMode.MONTH) CalendarMode.AGENDA else CalendarMode.MONTH) }) {
+            if (wide) IconButton(onClick = { viewModel.setMode(if (state.mode == CalendarMode.MONTH) CalendarMode.AGENDA else CalendarMode.MONTH) }) {
                 Icon(if (state.mode == CalendarMode.MONTH) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.CalendarViewMonth,
                     contentDescription = if (state.mode == CalendarMode.MONTH) "Agenda view" else "Month view")
-            }
+            } else ViewOptions(state, viewModel)
         } else TopAppBar(
             title = { Text(Format.monthTitle(state.month.year, state.month.month), modifier = Modifier.testTag("monthTitle")) },
             actions = {
@@ -209,7 +216,8 @@ fun CalendarScreen(
                 IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
             },
         )
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Inside Planned on a phone the filter is in View options (review spec U3: the height goes to the day's items).
+        if (!embedded || wide) Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CalendarFilter.entries.forEach { f ->
                 FilterChip(selected = state.filter == f, onClick = { viewModel.setFilter(f) }, label = { Text(f.label) })
             }
@@ -222,10 +230,8 @@ fun CalendarScreen(
                 DayPanel(state, onOpenEvent, onOpenTask, viewModel::toggleTask, { onNewEvent(state.selected) }, { addingTask = true }, Modifier.weight(1f))
             }
         } else {
-            Column(Modifier.weight(1f)) {
-                MonthGrid(state, viewModel::select, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                DayPanel(state, onOpenEvent, onOpenTask, viewModel::toggleTask, { onNewEvent(state.selected) }, { addingTask = true }, Modifier.weight(1f))
-            }
+            CompactMonth(state, viewModel::select, onOpenEvent, onOpenTask, viewModel::toggleTask, { onNewEvent(state.selected) }, { addingTask = true },
+                Modifier.weight(1f))
         }
     }
     if (addingTask) {
@@ -250,13 +256,107 @@ fun CalendarScreen(
     }
 }
 
+/** Month or agenda, and which items to show, in one menu (Planned's calendar on phones). */
 @Composable
-private fun MonthGrid(state: CalendarState, onSelect: (LocalDate) -> Unit, modifier: Modifier = Modifier) {
+private fun ViewOptions(state: CalendarState, viewModel: CalendarViewModel) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.testTag("calendarOptions")) {
+            Icon(Icons.Filled.Tune, contentDescription = "View options")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            CalendarMode.entries.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(if (m == CalendarMode.MONTH) "Month view" else "Agenda view") },
+                    leadingIcon = { RadioButton(selected = state.mode == m, onClick = null) },
+                    onClick = { viewModel.setMode(m); open = false },
+                    modifier = Modifier.testTag("calendarMode:${m.name}"),
+                )
+            }
+            HorizontalDivider()
+            CalendarFilter.entries.forEach { f ->
+                DropdownMenuItem(
+                    text = { Text(f.label) },
+                    leadingIcon = { RadioButton(selected = state.filter == f, onClick = null) },
+                    onClick = { viewModel.setFilter(f); open = false },
+                    modifier = Modifier.testTag("calendarFilter:${f.name}"),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Phones (review spec U3): the grid, the day heading and the day's items scroll as one list, so the items are never
+ * squeezed out. When the whole month and three items cannot fit, the grid starts as the selected week only; the
+ * toggle under it shows the whole month (or one week again).
+ */
+@Composable
+private fun CompactMonth(
+    state: CalendarState,
+    onSelect: (LocalDate) -> Unit,
+    onOpenEvent: (String) -> Unit,
+    onOpenTask: (String) -> Unit,
+    onToggleTask: (TaskEntity) -> Unit,
+    onAddEvent: () -> Unit,
+    onAddTask: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val weeks = weeksIn(state)
+        val cell = ((maxWidth - 16.dp) / 7).coerceAtLeast(44.dp)
+        val month = 20.dp + cell * weeks + 8.dp
+        val roomy = maxHeight >= month + DAY_HEADER + ITEM * 3
+        var choice by rememberSaveable { mutableStateOf<Boolean?>(null) }
+        val wholeMonth = choice ?: roomy
+        val items = state.itemsOn(state.selected)
+        LazyColumn(Modifier.fillMaxSize().testTag("calendarList"), contentPadding = PaddingValues(bottom = 16.dp)) {
+            item(key = "grid") {
+                MonthGrid(state, onSelect, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), weekOnly = !wholeMonth)
+            }
+            // A slim full-width bar, so the week stays close to the day's items.
+            if (!roomy || choice != null) item(key = "gridToggle") {
+                val label = if (wholeMonth) "Show one week" else "Show whole month"
+                Row(
+                    Modifier.fillMaxWidth().height(32.dp).clickable(onClickLabel = label) { choice = !wholeMonth }
+                        .semantics(mergeDescendants = true) { role = Role.Button }.testTag("gridToggle"),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(if (wholeMonth) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item(key = "dayHeader") { DayHeader(state, onAddEvent, onAddTask) }
+            if (items.isEmpty) item(key = "nothing") {
+                Text("Nothing on this day.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            }
+            items(items.events, key = { "e" + it.id }) { Box(Modifier.padding(horizontal = 12.dp, vertical = 3.dp)) { EventRow(it, state, onOpenEvent) } }
+            items(items.tasks, key = { "t" + it.id }) { Box(Modifier.padding(horizontal = 12.dp, vertical = 3.dp)) { TaskLine(it, onOpenTask, onToggleTask) } }
+        }
+    }
+}
+
+private val DAY_HEADER = 57.dp
+private val ITEM = 66.dp
+
+private fun weeksIn(state: CalendarState): Int {
+    val first = state.month.atDay(1)
+    val offset = ((first.dayOfWeek.value - state.firstDay.value) + 7) % 7
+    return ((offset + state.month.lengthOfMonth()) + 6) / 7
+}
+
+@Composable
+private fun MonthGrid(state: CalendarState, onSelect: (LocalDate) -> Unit, modifier: Modifier = Modifier, weekOnly: Boolean = false) {
     val extra = LocalExtra.current
     val first = state.month.atDay(1)
     val offset = ((first.dayOfWeek.value - state.firstDay.value) + 7) % 7
     val start = first.minusDays(offset.toLong())
-    val weeks = ((offset + state.month.lengthOfMonth()) + 6) / 7
+    val weeks = weeksIn(state)
+    // One week: the selected day's when it is in the shown month, else the month's first.
+    val selectedWeek = if (YearMonth.from(state.selected) == state.month) (offset + state.selected.dayOfMonth - 1) / 7 else 0
+    val rows = if (weekOnly) selectedWeek..selectedWeek else 0 until weeks
     Column(modifier.testTag("monthGrid")) {
         Row(Modifier.fillMaxWidth()) {
             (0 until 7).forEach { i ->
@@ -265,7 +365,7 @@ private fun MonthGrid(state: CalendarState, onSelect: (LocalDate) -> Unit, modif
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        (0 until weeks).forEach { w ->
+        rows.forEach { w ->
             Row(Modifier.fillMaxWidth()) {
                 (0 until 7).forEach { d ->
                     val date = start.plusDays((w * 7 + d).toLong())
@@ -316,13 +416,7 @@ private fun DayPanel(
 ) {
     val items = state.itemsOn(state.selected)
     Column(modifier.fillMaxWidth()) {
-        HorizontalDivider()
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(Format.relativeDate(state.selected, state.today), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = onAddTask, modifier = Modifier.testTag("addTaskOnDay")) { Icon(Icons.Filled.AddTask, null); Spacer(Modifier.width(4.dp)); Text("Task") }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = onAddEvent, modifier = Modifier.testTag("addEventOnDay")) { Icon(Icons.Filled.Add, null); Spacer(Modifier.width(4.dp)); Text("Event") }
-        }
+        DayHeader(state, onAddEvent, onAddTask)
         if (items.isEmpty) {
             Text("Nothing on this day.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         } else {
@@ -330,6 +424,20 @@ private fun DayPanel(
                 items(items.events, key = { "e" + it.id }) { EventRow(it, state, onOpenEvent) }
                 items(items.tasks, key = { "t" + it.id }) { TaskLine(it, onOpenTask, onToggleTask) }
             }
+        }
+    }
+}
+
+@Composable
+private fun DayHeader(state: CalendarState, onAddEvent: () -> Unit, onAddTask: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider()
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(Format.relativeDate(state.selected, state.today), style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f).testTag("dayHeading"))
+            OutlinedButton(onClick = onAddTask, modifier = Modifier.testTag("addTaskOnDay")) { Icon(Icons.Filled.AddTask, null); Spacer(Modifier.width(4.dp)); Text("Task") }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = onAddEvent, modifier = Modifier.testTag("addEventOnDay")) { Icon(Icons.Filled.Add, null); Spacer(Modifier.width(4.dp)); Text("Event") }
         }
     }
 }
