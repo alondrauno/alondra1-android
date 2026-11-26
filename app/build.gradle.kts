@@ -33,6 +33,18 @@ android {
                 keyPassword = System.getenv("ALONDRA1_KEY_PASSWORD")
             }
         }
+        // The Dev app's own stable key (CI secret), so a newer Dev APK installs over the previous one and keeps its data.
+        // Never the prod key; without it, local dev builds use the debug key as before.
+        create("dev") {
+            val store = System.getenv("ALONDRA1_DEV_KEYSTORE_FILE")
+            if (store != null) {
+                storeFile = file(store)
+                storeType = "pkcs12"
+                storePassword = System.getenv("ALONDRA1_DEV_KEYSTORE_PASSWORD")
+                keyAlias = "alondra1-dev"
+                keyPassword = System.getenv("ALONDRA1_DEV_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     // One app, two environments (completion spec v1.1 §8.3): separate application ids, names, endpoints and discovery
@@ -54,6 +66,7 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
             resValue("string", "app_name", "Alondra1 Dev")
+            if (System.getenv("ALONDRA1_DEV_KEYSTORE_FILE") != null) signingConfig = signingConfigs.getByName("dev")
             buildConfigField("String", "ENVIRONMENT", "\"dev\"")
             buildConfigField("String", "API_ORIGIN", "\"https://api.alondra1.dev\"")
             buildConfigField("String", "DISCOVERY_PRIMARY", "\"https://config.alondra1.dev/manifest.json\"")

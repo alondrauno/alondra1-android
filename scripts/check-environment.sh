@@ -11,7 +11,8 @@ if env == "prod":
     forbidden = ["https://api.alondra1.dev", "https://config.alondra1.dev", "https://config2.alondra1.dev", "http://10.0.2.2"]
     required = "https://api.alondra1.com"
 else:
-    forbidden = ["https://api.alondra1.com", "https://config.alondra1.com", "https://config2.alondra1.com"]
+    # The published Dev app uses Dev discovery, never a laptop's development server.
+    forbidden = ["https://api.alondra1.com", "https://config.alondra1.com", "https://config2.alondra1.com", "http://10.0.2.2"]
     required = "https://api.alondra1.dev"
 with zipfile.ZipFile(artifact) as z:
     dex = [z.read(n) for n in z.namelist() if n.endswith(".dex")]
