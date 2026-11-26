@@ -279,6 +279,16 @@ class SyncEngine(
         }
     }
 
+    /**
+     * Retry for a file whose upload was refused (Dev-only spec U9): forget the error, queue the task that lists it again
+     * (the upload runs before that task is pushed) and sync now. Returns the resulting status.
+     */
+    suspend fun retryTaskFile(taskId: String, sha: String): SyncStatus {
+        db.taskFiles().clearError(sha)
+        db.withTransaction { enqueue(EntityType.TASK, taskId) }
+        return syncNow()
+    }
+
     /** The server's attachment limits, so the app refuses a file before the user waits for a transfer. */
     private suspend fun refreshTaskFileLimits(tenantId: String) {
         val limits = runCatching { api.call("GET", "/v1/task-files/limits", null, tenantId) }.getOrNull() ?: return
@@ -395,11 +405,29 @@ class SyncEngine(
         val now = time.now()
         val copyId = Ids.newId()
         var noteCopy: String? = null
+        var report = true
+        var mergedFiles: JsonArray? = null
         val title = titleOf(row.entityType, row.entityId)
         when (row.entityType) {
-            EntityType.TASK.wire -> db.tasks().get(row.entityId)?.takeIf { it.deletedUtc == null }?.let {
-                db.tasks().put(it.copy(id = copyId, title = (it.title + " (conflict copy)").take(500), serverVersion = null, remoteJson = null, createdUtc = now, modifiedUtc = now))
-                enqueue(EntityType.TASK, copyId)
+            // Attachments merge three-way on the original task (Dev-only spec BE-03): a file removed here is not brought
+            // back, files added on either side are kept, and the copy carries no attachments, so nothing is duplicated.
+            // When only attachments differ, the merge is all there is: no copy and no sync issue.
+            EntityType.TASK.wire -> db.tasks().get(row.entityId)?.takeIf { it.deletedUtc == null }?.let { mine ->
+                val base = mine.remoteJson?.let { runCatching { WireMapper.json.parseToJsonElement(it).jsonObject }.getOrNull() }
+                val local = WireMapper.task(mine)
+                val remoteExists = current != null && !currentDeleted
+                val remoteFiles = (current?.get(row.entityType) as? JsonObject)?.get("attachments") as? JsonArray
+                if (remoteExists) {
+                    mergedFiles = com.alondra1.app.domain.AttachmentMerge.merge(base?.get("attachments") as? JsonArray, local["attachments"] as? JsonArray, remoteFiles)
+                        .takeUnless { com.alondra1.app.domain.AttachmentMerge.sameIds(it, remoteFiles) }
+                }
+                report = !remoteExists || base == null || otherThanAttachments(base, local)
+                if (report) {
+                    // The original is gone on the server: the copy is where this device's files stay listed.
+                    db.tasks().put(mine.copy(id = copyId, title = (mine.title + " (conflict copy)").take(500), serverVersion = null, remoteJson = null,
+                        attachmentsJson = if (remoteExists) "[]" else mine.attachmentsJson, createdUtc = now, modifiedUtc = now))
+                    enqueue(EntityType.TASK, copyId)
+                }
             }
             EntityType.NOTE.wire -> db.notes().get(row.entityId)?.takeIf { it.deletedUtc == null }?.let {
                 db.notes().put(it.copy(id = copyId, title = (com.alondra1.app.domain.NoteRules.displayTitle(it) + com.alondra1.app.domain.NoteMerge.CONFLICT_SUFFIX).take(500), serverVersion = null, remoteJson = null, createdUtc = now, modifiedUtc = now))
@@ -414,10 +442,29 @@ class SyncEngine(
         }
         if (current != null && !currentDeleted) applyRecord(row.entityType, current, force = true)
         if (currentDeleted) tombstone(row.entityType, row.entityId)
-        sync.addIssue(SyncIssueEntity(entityType = row.entityType, entityId = row.entityId, title = title,
+        mergedFiles?.let { files ->
+            db.tasks().get(row.entityId)?.let { db.tasks().put(it.copy(attachmentsJson = files.toString(), modifiedUtc = now)) }
+            enqueue(EntityType.TASK, row.entityId)
+        }
+        if (report) sync.addIssue(SyncIssueEntity(entityType = row.entityType, entityId = row.entityId, title = title,
             message = if (currentDeleted) "It was deleted on another device while you edited it here. Your version was kept as a conflict copy."
             else "It was changed on another device too. The other version is shown; yours was kept as a conflict copy.",
             createdUtc = now.toEpochMilli(), copyId = noteCopy))
+    }
+
+    /** True when the two task objects differ in more than attachments (and the modified time, which every edit changes). */
+    private fun otherThanAttachments(a: JsonObject, b: JsonObject): Boolean =
+        (a.keys + b.keys).filter { it != "attachments" && it != "modifiedUtc" }.any { !sameValue(a[it], b[it]) }
+
+    /** Equal as task data: 1 and 1.0 are the same number; absent, null and an empty list are the same "nothing". */
+    private fun sameValue(x: JsonElement?, y: JsonElement?): Boolean {
+        fun empty(e: JsonElement?) = e == null || e is JsonNull || (e is JsonArray && e.isEmpty())
+        if (empty(x) && empty(y)) return true
+        if (x is JsonPrimitive && y is JsonPrimitive && !x.isString && !y.isString) {
+            val a = x.content.toDoubleOrNull(); val b = y.content.toDoubleOrNull()
+            if (a != null && b != null) return a == b
+        }
+        return x == y
     }
 
     // ------------------------------------------------------------------------------------------- pull

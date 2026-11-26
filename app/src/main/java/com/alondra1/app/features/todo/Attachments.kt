@@ -158,6 +158,22 @@ fun AttachmentsSection(taskId: String, attachmentsJson: String, modifier: Modifi
                     AttachmentRow(
                         attachment = a, file = file, state = container.taskFiles.state(a, file), cloudOn = cloudOn, busy = busy == a.id,
                         onOpen = { act(a, share = false) }, onShare = { act(a, share = true) },
+                        onRetry = {
+                            scope.launch {
+                                val engine = container.syncEngine
+                                val sha = a.sha256
+                                if (engine == null || sha == null) return@launch
+                                busy = a.id
+                                val status = engine.retryTaskFile(taskId, sha)
+                                busy = null
+                                val after = container.db.taskFiles().get(sha)
+                                snackbar.showSnackbar(when {
+                                    after?.uploaded == true -> "${a.fileName} synced."
+                                    after?.lastError != null -> "Still not synced: ${after.lastError}"
+                                    else -> status.message ?: "Will retry when the cloud can be reached."
+                                })
+                            }
+                        },
                         onRemove = {
                             scope.launch {
                                 val before = container.todo.getTask(taskId)
@@ -189,6 +205,7 @@ private fun AttachmentRow(
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onRemove: () -> Unit,
+    onRetry: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     var menu by remember { mutableStateOf(false) }
@@ -228,12 +245,14 @@ private fun AttachmentRow(
             Text(TaskAttachments.sizeLabel(attachment.size) + " · " + status, style = MaterialTheme.typography.bodySmall,
                 color = if (state == AttachmentState.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         }
-        if (busy) CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = "Opening" }, strokeWidth = 2.dp)
+        if (busy) CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = "Working" }, strokeWidth = 2.dp)
+        else if (state == AttachmentState.FAILED) TextButton(onClick = onRetry, modifier = Modifier.testTag("retry:${attachment.fileName}")) { Text("Retry") }
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Options for ${attachment.fileName}") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Open") }, onClick = { menu = false; onOpen() })
                 DropdownMenuItem(text = { Text("Share or save…") }, onClick = { menu = false; onShare() })
+                if (state == AttachmentState.FAILED) DropdownMenuItem(text = { Text("Retry upload") }, onClick = { menu = false; onRetry() })
                 DropdownMenuItem(text = { Text("Remove from task", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onRemove() })
             }
         }
@@ -259,11 +278,18 @@ object AttachmentOpener {
             }
             if (!got) return "This file hasn't been uploaded from the other device yet."
         }
+        // The type recognised on this device from the bytes wins over the one the sending device claimed.
+        val type = container.db.taskFiles().get(sha)?.mimeType ?: a.mediaType ?: "application/octet-stream"
+        val viewable = TaskAttachments.canView(a.fileName, type) && TaskAttachments.canView(a.fileName, a.mediaType)
+        if (!share && !viewable) {
+            return "For your safety, Alondra1 doesn't open apps, installers or scripts. Use Share to save the file, and check it before you open it."
+        }
         val outgoing = withContext(Dispatchers.IO) { copyOut(context, container.taskFiles.fileOf(sha), a) }
         val uri = FileProvider.getUriForFile(context, context.packageName + ".files", outgoing)
-        val type = a.mediaType ?: container.db.taskFiles().get(sha)?.mimeType ?: "application/octet-stream"
         val intent = if (share) {
-            Intent.createChooser(Intent(Intent.ACTION_SEND).setType(type).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), a.fileName)
+            // Risky files are shared as plain bytes, so no package installer offers itself as a target.
+            val sendType = if (viewable) type else "application/octet-stream"
+            Intent.createChooser(Intent(Intent.ACTION_SEND).setType(sendType).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), a.fileName)
         } else {
             Intent(Intent.ACTION_VIEW).setDataAndType(uri, type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }

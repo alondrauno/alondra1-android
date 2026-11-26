@@ -160,6 +160,59 @@ class SyncEngineTest {
         assertEquals(0, c.db.sync().outbox().size)
     }
 
+    @Test fun attachmentMergeFollowsTheSharedContractFixture() {
+        val fixture = WireMapper.json.parseToJsonElement(javaClass.classLoader!!.getResource("todo-v1/merge-attachments.json")!!.readText()).jsonObject
+        for (case in fixture["cases"]!!.jsonArray.map { it.jsonObject }) {
+            val merged = com.alondra1.app.domain.AttachmentMerge.merge(case["base"] as? kotlinx.serialization.json.JsonArray,
+                case["local"] as? kotlinx.serialization.json.JsonArray, case["remote"] as? kotlinx.serialization.json.JsonArray)
+            assertEquals(case["name"]!!.jsonPrimitive.content, case["expected"]!!.jsonArray.map { it.jsonPrimitive.content },
+                merged.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+        }
+    }
+
+    private fun fileJson(id: String, sha: Char) =
+        """{"id":"$id","fileName":"$id.pdf","size":3,"addedUtc":"2026-11-01T00:00:00Z","sha256":"${sha.toString().repeat(64)}","mediaType":"application/pdf"}"""
+
+    private fun taskWithFiles(id: String, version: Int, title: String, vararg files: String) =
+        taskRecord(id, version, title, "d").replace(""","myDayDate":"2026-11-23"}""", ""","myDayDate":"2026-11-23","attachments":[${files.joinToString(",")}]}""")
+
+    @Test fun aConflictNeverBringsBackARemovedAttachmentNorDuplicatesFiles() = runBlocking<Unit> {
+        bootstrapItems = "[${listRecord("d", 1, true)},${taskWithFiles("t1", 3, "Shared task", fileJson("a1", '1'), fileJson("a2", '2'))}]"
+        engine.enable(tenant)
+        c.todo.removeAttachment("t1", "a1")
+        pushResponder = { req ->
+            val m = req["mutations"]!!.jsonArray.first().jsonObject
+            pushResponder = { appliedAll(it) }
+            json("""{"results":[{"mutation_id":"${m["mutation_id"]!!.jsonPrimitive.content}","status":"conflict","code":"VERSION_CONFLICT",
+                "current":${taskWithFiles("t1", 4, "Renamed on Windows", fileJson("a1", '1'), fileJson("a2", '2'), fileJson("a3", '3')).let { WireMapper.json.parseToJsonElement(it).jsonObject["record"] }}}]}""")
+        }
+        engine.syncNow()
+        val t1 = c.db.tasks().get("t1")!!
+        assertEquals("Renamed on Windows", t1.title)
+        assertEquals(listOf("a2", "a3"), com.alondra1.app.domain.TaskAttachments.parse(t1.attachmentsJson).map { it.id })
+        assertTrue("no conflict copy when only attachments differed", c.db.tasks().all().none { it.title.endsWith("(conflict copy)") })
+        assertEquals(0, c.db.sync().observeIssuesOnce().size)
+        val patch = pushes.flatMap { it["mutations"]!!.jsonArray }.map { it.jsonObject }.last { it["resource_id"]!!.jsonPrimitive.content == "t1" }
+        assertEquals(listOf("a2", "a3"), patch["changes"]!!.jsonObject["attachments"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+    }
+
+    @Test fun aConflictCopyCarriesNoAttachmentsWhileTheOriginalExists() = runBlocking<Unit> {
+        bootstrapItems = "[${listRecord("d", 1, true)},${taskWithFiles("t1", 3, "Shared task", fileJson("a1", '1'))}]"
+        engine.enable(tenant)
+        c.todo.getTask("t1")!!.let { c.todo.updateTask(it.copy(title = "Edited on the phone")) }
+        pushResponder = { req ->
+            val m = req["mutations"]!!.jsonArray.first().jsonObject
+            pushResponder = { appliedAll(it) }
+            json("""{"results":[{"mutation_id":"${m["mutation_id"]!!.jsonPrimitive.content}","status":"conflict","code":"VERSION_CONFLICT",
+                "current":${taskWithFiles("t1", 4, "Edited on Windows", fileJson("a1", '1')).let { WireMapper.json.parseToJsonElement(it).jsonObject["record"] }}}]}""")
+        }
+        engine.syncNow()
+        val copy = c.db.tasks().all().single { it.title == "Edited on the phone (conflict copy)" }
+        assertEquals("[]", copy.attachmentsJson)
+        assertEquals(listOf("a1"), com.alondra1.app.domain.TaskAttachments.parse(c.db.tasks().get("t1")!!.attachmentsJson).map { it.id })
+        assertEquals(1, c.db.sync().observeIssuesOnce().size)
+    }
+
     private fun noteRecord(id: String, version: Long, body: String) =
         """{"resource_type":"note","action":"upsert","resource_id":"$id","record":{"id":"$id","version":$version,"schema_version":1,"updated_at":"2026-11-20T00:00:00Z","note":{"id":"$id","title":"Shared","body":"$body","createdUtc":"2026-11-01T00:00:00Z","modifiedUtc":"2026-11-01T00:00:00Z"}}}"""
 
@@ -316,6 +369,29 @@ class SyncEngineTest {
         assertEquals(SyncState.SYNCED, status.state)
         assertEquals("A file can be at most 25 MB.", c.db.taskFiles().get(a.sha256!!)!!.lastError)
         assertNotNull(c.db.tasks().get(task.id)!!.serverVersion)
+
+        // Retry (U9): once the server accepts it, the same file goes up and the error is gone.
+        fileUploadStatus = 201
+        requests.clear()
+        assertEquals(SyncState.SYNCED, engine.retryTaskFile(task.id, a.sha256!!).state)
+        assertTrue(requests.contains("PUT /v1/task-files/${a.sha256}"))
+        val file = c.db.taskFiles().get(a.sha256!!)!!
+        assertTrue(file.uploaded)
+        assertEquals(null, file.lastError)
+    }
+
+    @Test fun aBusyServerKeepsTheFileAndTheTaskQueued() = runBlocking<Unit> {
+        val files = engineWithFiles()
+        fileUploadStatus = 503
+        val a = files.store("%PDF-1.7 busy".byteInputStream(), "busy.pdf", null)
+        val task = c.todo.addTask("Busy", attachments = listOf(a))
+        engine.enable(tenant)
+        val file = c.db.taskFiles().get(a.sha256!!)!!
+        assertTrue("a busy server is not a refusal", !file.uploaded && file.lastError == null)
+        assertTrue("the task stays queued", c.db.sync().outbox().any { it.entityId == task.id })
+        fileUploadStatus = 201
+        engine.syncNow()
+        assertTrue(c.db.taskFiles().get(a.sha256!!)!!.uploaded)
     }
 
     @Test fun aFileFromAnotherDeviceDownloadsOnDemandAndIsVerified() = runBlocking<Unit> {

@@ -32,7 +32,7 @@ Code: `navigation/AppNavigation.kt` (`Routes`, `AppNavHost`, `LocalOpenNoteConfl
 
 | ID | Atomic feature | Status | Notes |
 | --- | --- | --- | --- |
-| SHELL-NAV-01 | Three tabs: To-do, Notes, Calendar | Done | |
+| SHELL-NAV-01 | Four tabs: My Day, Planned, Lists, Notes (compact bottom bar, hidden with the keyboard); the calendar is Planned's Calendar view | Done | Earlier tab choices (To-do, Calendar) are migrated. |
 | SHELL-NAV-02 | Bottom bar on phones, navigation rail from 600 dp, list/detail panes from 840 dp | Done | |
 | SHELL-NAV-03 | Deep links `alondra1://task|note|event/{id}` | Done | |
 | SHELL-ONB-01 | First run: welcome, optionally start with example tasks | Done | `features/onboarding/WelcomeScreen.kt`. |
@@ -48,7 +48,7 @@ Code: `features/todo/` (`TodoScreen`, `TodoViewModel`, `TaskDetailScreen`), `dat
 | TODO-TASK-01 | Create, edit, delete (Undo), complete and reopen | Done | |
 | TODO-TASK-02 | Title (1–500 chars), notes, important | Done | |
 | TODO-TASK-03 | Steps (subtasks): add, check, reorder, remove; unknown keys of each step kept | Done | `TaskJson`, `TaskParityRepositoryTest`. |
-| TODO-TASK-06 | File attachments | Gap | Out of scope for phase 1. |
+| TODO-TASK-06 | File attachments: system picker, private copy per SHA-256, upload before the task with Cloud Sync, download on demand with hash check, open or share through a FileProvider; apps, installers and scripts are never opened (share only); refused uploads show why with Retry; conflicts merge attachments three-way | Done | `features/todo/Attachments.kt`, `data/repository/TaskFiles.kt`, `domain/AttachmentMerge.kt`. |
 | TODO-TASK-08 | Move a task to another list | Done | Task detail. |
 | TODO-TASK-10 | A task can remember the note it came from (`sourceNoteId`) | Done | Checklist → task. |
 | TODO-DATE-01 | Due date and optional time | Done | |

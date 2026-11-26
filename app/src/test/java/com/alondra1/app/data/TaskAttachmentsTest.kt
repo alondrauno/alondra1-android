@@ -55,6 +55,16 @@ class TaskAttachmentsTest {
         assertTrue("no partial files are left", c.taskFiles.directory.walkTopDown().none { it.isFile })
     }
 
+    @Test fun appsInstallersAndScriptsAreNeverOpenedOnlyShared() {
+        listOf("app.apk", "Bundle.APKS", "game.xapk", "lib.so", "run.sh", "setup.exe", "photo.jpg.apk", "notes.apk.txt", "x.js")
+            .forEach { assertFalse(it, TaskAttachments.canView(it, "application/octet-stream")) }
+        assertFalse(TaskAttachments.canView("ticket.pdf", "application/vnd.android.package-archive"))
+        assertFalse(TaskAttachments.canView("readme", "application/x-executable"))
+        assertTrue(TaskAttachments.canView("ticket.pdf", "application/pdf"))
+        assertTrue(TaskAttachments.canView("photo.JPG", "image/jpeg"))
+        assertTrue(TaskAttachments.canView("plan.xlsx", null))
+    }
+
     @Test fun namesAreCleanedForDisplayAndSaving() {
         assertEquals("passwd", TaskAttachments.safeName("../../etc/passwd"))
         assertEquals("report.pdf", TaskAttachments.safeName("C:\\Users\\me\\report.pdf"))

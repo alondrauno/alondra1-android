@@ -88,6 +88,27 @@ object TaskAttachments {
 
     fun count(text: String?): Int = if (text.isNullOrEmpty() || text == "[]") 0 else array(text).size
 
+    /** Extensions of programs, packages and scripts: never opened from a task, only shared as plain bytes (Dev-only spec AND-02, review S1). */
+    private val RISKY_EXTENSIONS = setOf(
+        "apk", "apks", "apkm", "xapk", "aab", "dex", "jar", "so", "sh", "bin", "elf",
+        "exe", "msi", "msix", "appx", "bat", "cmd", "com", "ps1", "psm1", "js", "jse", "vbs", "vbe", "wsf", "wsh",
+        "scr", "hta", "lnk", "pif", "cpl", "reg", "dll", "jnlp", "app", "dmg", "pkg", "run", "deb", "rpm",
+    )
+    private val RISKY_TYPES = setOf(
+        "application/vnd.android.package-archive", "application/x-executable", "application/x-msdownload",
+        "application/x-msdos-program", "application/java-archive", "application/x-sh", "application/x-elf",
+        "application/x-dosexec", "application/javascript", "text/javascript",
+    )
+
+    /**
+     * Whether a file may be handed to another app to view. Programs, packages and scripts (by any of their extensions,
+     * or by the type recognised from their bytes) may not: no task attachment ever starts an installer.
+     */
+    fun canView(fileName: String, type: String?): Boolean {
+        val extensions = safeName(fileName).lowercase().split('.').drop(1)
+        return extensions.none { it in RISKY_EXTENSIONS } && type?.lowercase()?.substringBefore(';')?.trim() !in RISKY_TYPES
+    }
+
     fun isHash(s: String) = s.length == 64 && s.all { it in '0'..'9' || it in 'a'..'f' }
 
     /** A display name safe to use as a file name anywhere: no path, no control or reserved characters, bounded. */

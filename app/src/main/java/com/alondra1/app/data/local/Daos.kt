@@ -181,6 +181,9 @@ interface TaskFileDao {
     @Query("UPDATE task_files SET lastError = :error WHERE sha256 = :sha")
     suspend fun markFailed(sha: String, error: String)
 
+    @Query("UPDATE task_files SET lastError = NULL WHERE sha256 = :sha")
+    suspend fun clearError(sha: String)
+
     @Query("SELECT * FROM task_files")
     suspend fun all(): List<TaskFileEntity>
 
