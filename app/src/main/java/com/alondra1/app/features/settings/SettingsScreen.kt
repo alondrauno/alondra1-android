@@ -1,5 +1,7 @@
 package com.alondra1.app.features.settings
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import android.content.Intent
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.clickable
@@ -113,7 +115,10 @@ fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, o
                 ListItem(
                     headlineContent = { Text("Hide reminder text on the lock screen") },
                     supportingContent = { Text("The lock screen shows only \"Alondra1 reminder\".") },
-                    trailingContent = { Switch(checked = settings.privateNotifications, onCheckedChange = { v -> scope.launch { container.settings.setPrivateNotifications(v) } }) },
+                    trailingContent = { Switch(checked = settings.privateNotifications, onCheckedChange = null) },
+                    modifier = Modifier.toggleable(settings.privateNotifications, role = Role.Switch) { v ->
+                        scope.launch { container.settings.setPrivateNotifications(v) }
+                    },
                 )
             }
 

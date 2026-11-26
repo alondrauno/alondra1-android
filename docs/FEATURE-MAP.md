@@ -219,11 +219,12 @@ Code: `features/settings/SettingsScreen.kt`, `data/settings/SettingsRepository.k
 | --- | --- | --- | --- |
 | OPS-BUILD-01 | Flavors × build types (prodDebug, prodRelease, devDebug, devRelease); min SDK 29, target 35 | Done | Check the current Play target-API policy before publishing. |
 | OPS-ENV-01 | `scripts/check-environment.sh`: a bundle of one environment contains no endpoint of the other, prod no debug server | Done | Run in CI and before publishing. |
-| OPS-REL-01 | Dev APK (debug-signed) on every main push as a workflow artifact | Done | `release.yml`. |
+| OPS-REL-01 | Dev APK (`com.alondra1.app.dev`, signed with the stable Dev key) on every main push, published as `Alondra1-dev.apk` with a `.sha256` to the public `dev-latest` prerelease | Done | `release.yml` job `dev-apk`; secrets `ALONDRA1_DEV_KEYSTORE_BASE64` and `_PASSWORD`. |
 | OPS-REL-02 | Prod bundle on `vX.Y.Z`, signed with the upload key and published only after approval in the `prod` environment; Play internal track when configured | Done | Secrets `ANDROID_UPLOAD_*`, `PLAY_SERVICE_ACCOUNT_JSON`. |
 | OPS-SIGN-01 | Release signing only from CI environment variables | Done | |
 | OPS-DB-01 | Room schema exported to `app/schemas`; `committedSchemaMatchesTheEntities` fails without a new version and migration | Done | Current version **5**. |
 | OPS-CI-01 | CI: lint, JVM tests of both flavors, dev APK, both release bundles with the environment check, emulator tests (`connectedProdDebugAndroidTest`) | Done | Actions pinned to commit SHAs. |
+| OPS-UI-01 | Screenshot and accessibility set on a 360×640 dp phone: My Day, Planned (list and calendar), Lists, Notes and a task's attachment detail. Each tappable control must have a spoken name and a target of at least 48×48 dp. Screenshots go to `app/build/outputs/screens/` (CI artifact `reports`) for review, not pixel diffs | Done | `ScreenRegressionTest`. It found unnamed switches (task detail, event editor, settings) and the unnamed New note button: switch rows are now `toggleable` with `Role.Switch`. |
 
 ---
 

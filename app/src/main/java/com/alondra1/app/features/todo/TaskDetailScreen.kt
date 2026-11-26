@@ -1,5 +1,7 @@
 package com.alondra1.app.features.todo
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -280,18 +282,19 @@ private fun TaskDetailBody(viewModel: TaskDetailViewModel, task: TaskEntity, lis
 
         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
             Column {
+                // The whole row is the switch, so a screen reader names it by its label (and the target is large).
                 ListItem(
                     headlineContent = { Text("Completed") },
-                    trailingContent = {
-                        Switch(checked = task.completed, onCheckedChange = { done -> viewModel.setCompleted(done) })
-                    },
+                    trailingContent = { Switch(checked = task.completed, onCheckedChange = null) },
+                    modifier = Modifier.toggleable(task.completed, role = Role.Switch) { done -> viewModel.setCompleted(done) },
                 )
                 HorizontalDivider()
                 ListItem(
                     leadingContent = { Icon(Icons.Filled.WbSunny, contentDescription = null) },
                     headlineContent = { Text(if (task.myDayDate == today) "In My Day" else "Add to My Day") },
-                    trailingContent = {
-                        Switch(checked = task.myDayDate == today, onCheckedChange = { add -> viewModel.edit { it.copy(myDayDate = if (add) today else null) } })
+                    trailingContent = { Switch(checked = task.myDayDate == today, onCheckedChange = null) },
+                    modifier = Modifier.toggleable(task.myDayDate == today, role = Role.Switch) { add ->
+                        viewModel.edit { it.copy(myDayDate = if (add) today else null) }
                     },
                 )
                 HorizontalDivider()

@@ -1,5 +1,6 @@
 package com.alondra1.app.features.settings
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -108,7 +109,8 @@ fun BackgroundScreen(onBack: () -> Unit) {
                 ListItem(
                     headlineContent = { Text("Show a background behind the workspace") },
                     supportingContent = { Text("Pictures stay on this device.") },
-                    trailingContent = { Switch(checked = bg.enabled, onCheckedChange = { save(bg.copy(enabled = it)) }, modifier = Modifier.testTag("backgroundEnabled")) },
+                    trailingContent = { Switch(checked = bg.enabled, onCheckedChange = null) },
+                    modifier = Modifier.testTag("backgroundEnabled").toggleable(bg.enabled, role = Role.Switch) { save(bg.copy(enabled = it)) },
                 )
             }
 

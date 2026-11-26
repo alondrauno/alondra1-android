@@ -1,5 +1,6 @@
 package com.alondra1.app.features.calendar
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -633,9 +634,8 @@ fun EventEditorScreen(viewModel: EventEditorViewModel, onClose: () -> Unit, onMe
             }
             Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
                 Column {
-                    ListItem(headlineContent = { Text("All day") }, trailingContent = {
-                        Switch(checked = viewModel.allDay, onCheckedChange = { viewModel.allDay = it; viewModel.error = null }, modifier = Modifier.testTag("allDay"))
-                    })
+                    ListItem(headlineContent = { Text("All day") }, trailingContent = { Switch(checked = viewModel.allDay, onCheckedChange = null) },
+                        modifier = Modifier.testTag("allDay").toggleable(viewModel.allDay, role = Role.Switch) { viewModel.allDay = it; viewModel.error = null })
                     HorizontalDivider()
                     ListItem(
                         headlineContent = { Text("Starts") },

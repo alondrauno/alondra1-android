@@ -239,7 +239,7 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
         },
         floatingActionButton = {
             if (state.view != NoteView.TRASH && state.view != NoteView.ARCHIVE)
-                ExtendedFloatingActionButton(onClick = { onOpen(newNoteRoute(state)) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("New note") },
+                ExtendedFloatingActionButton(onClick = { onOpen(newNoteRoute(state)) }, icon = { Icon(Icons.Filled.Add, "New note") }, text = { Text("New note") }, // Material hides the text from screen readers: the icon names the button
                     modifier = Modifier.testTag("newNote"))
         },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0),
