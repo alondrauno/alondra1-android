@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alondra1.app.data.repository.NotesRepository
@@ -194,8 +195,13 @@ class DialogFlowsTest {
         // The calendar lives inside Planned.
         rule.waitUntilAtLeastOneExists(hasTestTag("tab:Planned"), 10_000)
         rule.onNodeWithTag("tab:Planned").performClick()
-        rule.waitUntilAtLeastOneExists(hasTestTag("plannedCalendar"), 10_000)
-        rule.onNodeWithTag("plannedCalendar").performClick()
+        // The switch through its accessibility click, until the calendar shows (a tap during the tab transition is dropped).
+        rule.waitUntil(10_000) {
+            rule.onAllNodes(hasTestTag("monthTitle")).fetchSemanticsNodes().isNotEmpty() || run {
+                rule.onAllNodes(hasTestTag("plannedCalendar")).fetchSemanticsNodes().isNotEmpty() &&
+                    run { rule.onNodeWithTag("plannedCalendar").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick); false }
+            }
+        }
         rule.waitUntilAtLeastOneExists(hasText("Planning"), 10_000)
         rule.onAllNodes(hasText("Planning"))[0].performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("meetingNotes"), 10_000)
