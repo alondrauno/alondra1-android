@@ -49,6 +49,10 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE deletedUtc IS NULL")
     suspend fun all(): List<TaskEntity>
 
+    /** Live and deleted (tombstoned) tasks: a deleted task can still be restored with Undo, its files must stay. */
+    @Query("SELECT * FROM tasks")
+    suspend fun allIncludingDeleted(): List<TaskEntity>
+
     @Query("SELECT * FROM tasks WHERE id = :id")
     fun observe(id: String): Flow<TaskEntity?>
 
@@ -158,6 +162,33 @@ interface NoteFolderDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(folder: NoteFolderEntity)
+}
+
+@Dao
+interface TaskFileDao {
+    @Query("SELECT * FROM task_files WHERE sha256 = :sha")
+    suspend fun get(sha: String): TaskFileEntity?
+
+    @Query("SELECT * FROM task_files WHERE sha256 IN (:shas)")
+    fun observe(shas: List<String>): Flow<List<TaskFileEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(file: TaskFileEntity)
+
+    @Query("UPDATE task_files SET uploaded = 1, lastError = NULL WHERE sha256 = :sha")
+    suspend fun markUploaded(sha: String)
+
+    @Query("UPDATE task_files SET lastError = :error WHERE sha256 = :sha")
+    suspend fun markFailed(sha: String, error: String)
+
+    @Query("SELECT * FROM task_files")
+    suspend fun all(): List<TaskFileEntity>
+
+    @Query("DELETE FROM task_files WHERE sha256 = :sha")
+    suspend fun delete(sha: String)
+
+    @Query("DELETE FROM task_files")
+    suspend fun clear()
 }
 
 @Dao

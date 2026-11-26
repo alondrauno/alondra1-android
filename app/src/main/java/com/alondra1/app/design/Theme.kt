@@ -10,7 +10,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.alondra1.app.data.settings.ThemeMode
 
 /** Brand tokens (logo + Windows UI-DESIGN.md). Text pairs meet WCAG AA in both themes. */
@@ -23,16 +25,19 @@ object Brand {
     val Peach = Color(0xFFF7D7CB)
     val Canvas = Color(0xFFFBF9FE)
 
-    // Dark app UI, from the Windows dark theme
-    val Chrome = Color(0xFF16151F)
-    val Panel = Color(0xFF1E1D2A)
-    val Row = Color(0xFF252434)
-    val Line = Color(0xFF33324A)
-    val TextDark = Color(0xFFECEBF5)
-    val MutedDark = Color(0xFFA4A3BE)
-    val Accent = Color(0xFFBEBFF2)
+    // Dark app UI: the website direction (Android UI spec §3.1). Text on every surface below is at least 4.5:1
+    // (muted text #A5A2BB on the raised surface #262436 is 6.0:1); the accent is a selection cue next to a shape or
+    // weight change, never the only one.
+    val Chrome = Color(0xFF17151F) // bg.app
+    val Panel = Color(0xFF201E2B) // bg.surface: task cards, panels
+    val Row = Color(0xFF262436) // bg.surfaceRaised: composer, raised blocks
+    val Line = Color(0xFF302E40) // border.subtle
+    val TextDark = Color(0xFFE8E6F0) // text.primary
+    val MutedDark = Color(0xFFA5A2BB) // text.secondary
+    val Accent = Color(0xFFB9B6F2) // accent.primary
+    val AccentStrong = Color(0xFF7589FF) // accent.strong: small progress accents
     val Selected = Color(0xFF302F54)
-    val Star = Color(0xFFF5C542)
+    val Star = Color(0xFFFFD34F) // status.important
     val Danger = Color(0xFFE5484D)
     val Overdue = Color(0xFFFF8A80)
     val OverdueLight = Color(0xFFB42318)
@@ -92,9 +97,39 @@ private val LightColors = lightColorScheme(
 )
 
 @Immutable
-data class Extra(val star: Color, val overdue: Color, val event: Color, val task: Color, val isDark: Boolean)
+data class Extra(val star: Color, val overdue: Color, val event: Color, val task: Color, val isDark: Boolean, val progress: Color = Brand.AccentStrong)
 
 val LocalExtra = staticCompositionLocalOf { Extra(Brand.Star, Brand.Overdue, Brand.EventColor, Brand.TaskColor, true) }
+
+/** Spacing and shape tokens (4 dp grid, Android UI spec §3.2). Use these instead of ad-hoc values on new screens. */
+object Space {
+    val xs = 4.dp
+    val s = 8.dp
+    val m = 12.dp
+    val l = 16.dp
+    val screen = 20.dp // horizontal screen padding
+    val card = 16.dp // inner card padding
+    val cardGap = 10.dp // between task cards
+    val touch = 48.dp // smallest interactive target
+}
+
+object Radius {
+    val card = RoundedCornerShape(20.dp)
+    val composer = RoundedCornerShape(20.dp)
+    val control = RoundedCornerShape(14.dp)
+}
+
+/** Type scale in sp so it follows the user's font size (title 28 bold, task title 16 medium, metadata 13). */
+val AppTypography = androidx.compose.material3.Typography().let { t ->
+    t.copy(
+        headlineMedium = t.headlineMedium.copy(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold),
+        titleMedium = t.titleMedium.copy(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
+        bodyLarge = t.bodyLarge.copy(fontSize = 16.sp, lineHeight = 22.sp),
+        bodyMedium = t.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
+        bodySmall = t.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp),
+        labelMedium = t.labelMedium.copy(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+    )
+}
 
 @Composable
 fun Alondra1Theme(mode: ThemeMode = ThemeMode.DARK, content: @Composable () -> Unit) {
@@ -104,12 +139,25 @@ fun Alondra1Theme(mode: ThemeMode = ThemeMode.DARK, content: @Composable () -> U
         ThemeMode.DARK -> true
     }
     val extra = if (dark) Extra(Brand.Star, Brand.Overdue, Brand.EventColor, Brand.TaskColor, true)
-    else Extra(Color(0xFFB07D00), Brand.OverdueLight, Color(0xFF3657D6), Color(0xFF16803C), false)
+    else Extra(Color(0xFFB07D00), Brand.OverdueLight, Color(0xFF3657D6), Color(0xFF16803C), false, progress = Color(0xFF3F55D6))
+    // Status and navigation bar icons follow the app theme, not the system one (spec §3.3: readable over the app).
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            (view.context as? android.app.Activity)?.window?.let { window ->
+                androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+        }
+    }
     androidx.compose.runtime.CompositionLocalProvider(LocalExtra provides extra) {
         MaterialTheme(
             colorScheme = if (dark) DarkColors else LightColors,
+            typography = AppTypography,
             shapes = Shapes(
-                small = RoundedCornerShape(10.dp),
+                small = RoundedCornerShape(12.dp),
                 medium = RoundedCornerShape(16.dp),
                 large = RoundedCornerShape(22.dp),
             ),

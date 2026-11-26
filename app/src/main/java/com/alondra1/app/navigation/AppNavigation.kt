@@ -13,10 +13,29 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -80,6 +99,7 @@ import com.alondra1.app.features.todo.TaskDetailViewModel
 import com.alondra1.app.features.todo.TodoScreen
 import com.alondra1.app.features.todo.TodoSelection
 import com.alondra1.app.features.todo.TodoViewModel
+import com.alondra1.app.features.todo.ListsScreen
 import com.alondra1.app.ui.LocalContainer
 import com.alondra1.app.ui.LocalSnackbar
 import com.alondra1.app.ui.LocalTimeFormat
@@ -89,9 +109,22 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 object Routes {
-    const val TODO = "todo"
+    const val MY_DAY = "myday"
+    const val PLANNED = "planned"
+    const val LISTS = "lists"
     const val NOTES = "notes"
-    const val CALENDAR = "calendar"
+    /** A list or smart list opened from Lists: "v-<SmartView>" or "l-<list id>". */
+    const val LIST = "list/{key}"
+    fun list(selection: TodoSelection) = "list/" + when (selection) {
+        is TodoSelection.View -> "v-" + selection.view.name
+        is TodoSelection.List -> "l-" + selection.id
+    }
+    fun selection(key: String?): TodoSelection? = when {
+        key == null -> null
+        key.startsWith("v-") -> SmartView.entries.firstOrNull { it.name == key.drop(2) }?.let { TodoSelection.View(it) }
+        key.startsWith("l-") -> TodoSelection.List(key.drop(2))
+        else -> null
+    }
     const val TASK = "task/{id}"
     const val NOTE = "note/{id}"
     const val EVENT = "event/{id}"
@@ -109,10 +142,12 @@ object Routes {
 
 private data class TopLevel(val tab: Tab, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
+/** Exactly four primary destinations, in this order (Android UI spec §4). Outline icons; filled when selected. */
 private val TOP_LEVEL = listOf(
-    TopLevel(Tab.TODO, "To-do", Icons.Outlined.TaskAlt, Icons.Filled.CheckCircle),
-    TopLevel(Tab.NOTES, "Notes", Icons.Outlined.StickyNote2, Icons.Outlined.StickyNote2),
-    TopLevel(Tab.CALENDAR, "Calendar", Icons.Filled.CalendarMonth, Icons.Filled.CalendarMonth),
+    TopLevel(Tab.MY_DAY, "My Day", Icons.Outlined.WbSunny, Icons.Filled.WbSunny),
+    TopLevel(Tab.PLANNED, "Planned", Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
+    TopLevel(Tab.LISTS, "Lists", Icons.AutoMirrored.Outlined.List, Icons.AutoMirrored.Filled.List),
+    TopLevel(Tab.NOTES, "Notes", Icons.Outlined.StickyNote2, Icons.Filled.StickyNote2),
 )
 
 /** Root composable: theme, first run, adaptive navigation. */
@@ -149,6 +184,7 @@ fun Alondra1Root(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AppScaffold(
     container: AppContainer,
@@ -163,9 +199,12 @@ private fun AppScaffold(
     val twoPane = width >= 840
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
-    val topLevel = route in setOf(Routes.TODO, Routes.NOTES, Routes.CALENDAR)
+    val topLevel = route in TOP_LEVEL.map { it.tab.route }
     val scope = rememberCoroutineScope()
     val startTab = rememberSaveable { settings.lastTab.route }
+    // While typing (composer, search), the bottom navigation steps aside so the field stays above the keyboard.
+    val imeVisible = WindowInsets.isImeVisible
+    val showBar = topLevel && !useRail && !imeVisible
 
     LaunchedEffect(newIntents) { newIntents.collect { nav.handleDeepLink(it) } }
 
@@ -183,31 +222,17 @@ private fun AppScaffold(
         contentColor = MaterialTheme.colorScheme.onBackground,
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = if (topLevel && !useRail) WindowInsets(0) else WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
-        bottomBar = {
-            if (topLevel && !useRail) {
-                NavigationBar(Modifier.testTag("bottomNav")) {
-                    TOP_LEVEL.forEach { item ->
-                        val selected = route == item.tab.route
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = { go(item.tab) },
-                            icon = { Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null) },
-                            label = { Text(item.label) },
-                            modifier = Modifier.testTag("tab:${item.label}"),
-                        )
-                    }
-                }
-            }
-        },
+        bottomBar = { if (showBar) BottomBar(route) { go(it) } },
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
             if (useRail) {
                 NavigationRail(Modifier.testTag("navRail")) {
                     TOP_LEVEL.forEach { item ->
+                        val selected = route == item.tab.route || (route != null && belongsTo(route) == item.tab)
                         NavigationRailItem(
-                            selected = route == item.tab.route || (route != null && belongsTo(route) == item.tab),
+                            selected = selected,
                             onClick = { go(item.tab) },
-                            icon = { Icon(item.icon, contentDescription = null) },
+                            icon = { Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null) },
                             label = { Text(item.label) },
                             modifier = Modifier.testTag("tab:${item.label}"),
                         )
@@ -221,10 +246,51 @@ private fun AppScaffold(
     }
 }
 
+/**
+ * The compact bottom navigation (spec §4): four equal tabs with icon and label, a subtle lavender pill behind the
+ * selected icon plus a bolder label (not color alone), a stable 64 dp height above the system navigation bar.
+ */
+@Composable
+private fun BottomBar(route: String?, onSelect: (Tab) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp, modifier = Modifier.testTag("bottomNav")) {
+        Column {
+            androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).height(64.dp).selectableGroup()) {
+                TOP_LEVEL.forEach { item ->
+                    val selected = route == item.tab.route
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                            .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(item.tab) })
+                            .testTag("tab:${item.label}"),
+                    ) {
+                        Box(
+                            Modifier.size(width = 56.dp, height = 28.dp).background(
+                                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
+                                androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                            ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null, modifier = Modifier.size(22.dp),
+                                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(item.label, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+                            fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun belongsTo(route: String): Tab? = when {
-    route.startsWith("task") -> Tab.TODO
+    route.startsWith("list") -> Tab.LISTS
+    route.startsWith("task") -> Tab.MY_DAY
     route.startsWith("note") -> Tab.NOTES
-    route.startsWith("event") -> Tab.CALENDAR
+    route.startsWith("event") -> Tab.PLANNED
     else -> null
 }
 
@@ -232,26 +298,43 @@ private fun belongsTo(route: String): Tab? = when {
 private fun AppNavHost(nav: NavHostController, container: AppContainer, start: String, twoPane: Boolean, accountSection: @Composable () -> Unit) {
     CompositionLocalProvider(com.alondra1.app.features.notes.LocalOpenNoteConflict provides { nav.navigate(Routes.noteConflict(it)) }) {
     NavHost(navController = nav, startDestination = start) {
-        composable(Routes.TODO) {
-            val vm: TodoViewModel = viewModel { TodoViewModel(container, TodoSelection.View(SmartView.MY_DAY)) }
-            if (twoPane) {
-                var selected by rememberSaveable { mutableStateOf<String?>(null) }
-                Row(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(1f)) {
-                        TodoScreen(vm, onOpenTask = { selected = it }, onSearch = { nav.navigate(Routes.SEARCH) },
-                            onSettings = { nav.navigate(Routes.SETTINGS) }, selectedTaskId = selected)
-                    }
-                    VerticalDivider()
-                    Box(Modifier.width(420.dp).fillMaxHeight().testTag("detailPane")) {
-                        selected?.let { id ->
-                            val detail: TaskDetailViewModel = viewModel(key = "task-$id") { TaskDetailViewModel(container, id) }
-                            TaskDetailScreen(detail, onClose = { selected = null }, showBack = false)
-                        } ?: com.alondra1.app.ui.EmptyState(Icons.Outlined.TaskAlt, "No task selected", "Choose a task to see its details.")
-                    }
-                }
+        composable(Routes.MY_DAY) {
+            val vm: TodoViewModel = viewModel(key = "todo-myday") { TodoViewModel(container, TodoSelection.View(SmartView.MY_DAY)) }
+            TaskScreenWithPane(nav, container, vm, twoPane)
+        }
+        composable(Routes.PLANNED) {
+            val vm: TodoViewModel = viewModel(key = "todo-planned") { TodoViewModel(container, TodoSelection.View(SmartView.PLANNED)) }
+            var mode by rememberSaveable { mutableStateOf(PlannedMode.LIST) }
+            val switch: @Composable () -> Unit = { PlannedSwitch(mode) { mode = it } }
+            if (mode == PlannedMode.LIST) {
+                TaskScreenWithPane(nav, container, vm, twoPane, belowHeader = switch)
             } else {
-                TodoScreen(vm, onOpenTask = { nav.navigate(Routes.task(it)) }, onSearch = { nav.navigate(Routes.SEARCH) }, onSettings = { nav.navigate(Routes.SETTINGS) })
+                val calendar: CalendarViewModel = viewModel { CalendarViewModel(container) }
+                Column(Modifier.fillMaxSize()) {
+                    com.alondra1.app.design.AppHeader(title = "Planned", icon = Icons.Outlined.CalendarMonth,
+                        onSearch = { nav.navigate(Routes.SEARCH) }, onAccount = { nav.navigate(Routes.SETTINGS) })
+                    switch()
+                    CalendarScreen(
+                        calendar,
+                        onOpenEvent = { nav.navigate(Routes.event(it)) },
+                        onNewEvent = { nav.navigate(Routes.newEvent(it)) },
+                        onOpenTask = { nav.navigate(Routes.task(it)) },
+                        onSearch = { nav.navigate(Routes.SEARCH) },
+                        onSettings = { nav.navigate(Routes.SETTINGS) },
+                        embedded = true,
+                    )
+                }
             }
+        }
+        composable(Routes.LISTS) {
+            val vm: TodoViewModel = viewModel(key = "todo-lists") { TodoViewModel(container, TodoSelection.View(SmartView.ALL)) }
+            ListsScreen(vm, onOpen = { nav.navigate(Routes.list(it)) }, onSearch = { nav.navigate(Routes.SEARCH) }, onSettings = { nav.navigate(Routes.SETTINGS) })
+        }
+        composable(Routes.LIST, arguments = listOf(navArgument("key") { type = NavType.StringType })) { entry ->
+            val key = entry.arguments?.getString("key")
+            val selection = Routes.selection(key) ?: TodoSelection.View(SmartView.ALL)
+            val vm: TodoViewModel = viewModel(key = "todo-$key") { TodoViewModel(container, selection) }
+            TaskScreenWithPane(nav, container, vm, twoPane, onBack = { nav.popBackStack() })
         }
         composable(Routes.TASK, arguments = listOf(navArgument("id") { type = NavType.StringType }),
             deepLinks = listOf(navDeepLink { uriPattern = "alondra1://task/{id}" })) { entry ->
@@ -291,17 +374,6 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
             NoteEditorScreen(vm, onClose = { nav.popBackStack() }, onOpenTask = { nav.navigate(Routes.task(it)) }, onOpenEvent = { nav.navigate(Routes.event(it)) },
                 onCompare = { nav.navigate(Routes.noteConflict(it)) })
         }
-        composable(Routes.CALENDAR) {
-            val vm: CalendarViewModel = viewModel { CalendarViewModel(container) }
-            CalendarScreen(
-                vm,
-                onOpenEvent = { nav.navigate(Routes.event(it)) },
-                onNewEvent = { nav.navigate(Routes.newEvent(it)) },
-                onOpenTask = { nav.navigate(Routes.task(it)) },
-                onSearch = { nav.navigate(Routes.SEARCH) },
-                onSettings = { nav.navigate(Routes.SETTINGS) },
-            )
-        }
         composable(Routes.EVENT, arguments = listOf(navArgument("id") { type = NavType.StringType }),
             deepLinks = listOf(navDeepLink { uriPattern = "alondra1://event/{id}" })) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
@@ -334,5 +406,50 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
                 })
         }
     }
+    }
+}
+
+enum class PlannedMode { LIST, CALENDAR }
+
+/** Planned shows tasks by date, or the calendar (events with dated tasks): the calendar lives here (spec §4). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PlannedSwitch(mode: PlannedMode, onChange: (PlannedMode) -> Unit) {
+    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = com.alondra1.app.design.Space.screen).padding(bottom = 8.dp)) {
+        PlannedMode.entries.forEachIndexed { i, m ->
+            SegmentedButton(
+                selected = mode == m,
+                onClick = { onChange(m) },
+                shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, PlannedMode.entries.size),
+                modifier = Modifier.testTag(if (m == PlannedMode.LIST) "plannedList" else "plannedCalendar"),
+            ) { Text(if (m == PlannedMode.LIST) "List" else "Calendar") }
+        }
+    }
+}
+
+/** A task screen, with the task detail beside it on wide screens. */
+@Composable
+private fun TaskScreenWithPane(
+    nav: NavHostController, container: AppContainer, vm: TodoViewModel, twoPane: Boolean,
+    onBack: (() -> Unit)? = null, belowHeader: @Composable () -> Unit = {},
+) {
+    if (twoPane) {
+        var selected by rememberSaveable { mutableStateOf<String?>(null) }
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f)) {
+                TodoScreen(vm, onOpenTask = { selected = it }, onSearch = { nav.navigate(Routes.SEARCH) },
+                    onSettings = { nav.navigate(Routes.SETTINGS) }, selectedTaskId = selected, onBack = onBack, belowHeader = belowHeader)
+            }
+            VerticalDivider()
+            Box(Modifier.width(420.dp).fillMaxHeight().testTag("detailPane")) {
+                selected?.let { id ->
+                    val detail: TaskDetailViewModel = viewModel(key = "task-$id") { TaskDetailViewModel(container, id) }
+                    TaskDetailScreen(detail, onClose = { selected = null }, showBack = false)
+                } ?: com.alondra1.app.design.CompactEmptyState(Icons.Outlined.TaskAlt, "No task selected", "Choose a task to see its details.")
+            }
+        }
+    } else {
+        TodoScreen(vm, onOpenTask = { nav.navigate(Routes.task(it)) }, onSearch = { nav.navigate(Routes.SEARCH) },
+            onSettings = { nav.navigate(Routes.SETTINGS) }, onBack = onBack, belowHeader = belowHeader)
     }
 }

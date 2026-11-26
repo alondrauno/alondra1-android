@@ -63,6 +63,7 @@ class TodoRepository(
         important: Boolean = false,
         sourceNoteId: String? = null,
         notes: String = "",
+        attachments: List<com.alondra1.app.domain.TaskAttachment> = emptyList(),
     ): TaskEntity {
         val title = TaskRules.cleanTitle(rawTitle) ?: throw InvalidTitleException()
         val task = db.withTransaction {
@@ -81,6 +82,7 @@ class TodoRepository(
                 dueTime = dueTime?.takeIf { dueDate != null },
                 myDayDate = if (view == SmartView.MY_DAY) time.today() else null,
                 sourceNoteId = sourceNoteId,
+                attachmentsJson = com.alondra1.app.domain.TaskAttachments.add("[]", attachments),
             ).also { tasks.insert(it) }
         }
         changes.recorded(EntityType.TASK, task.id)
@@ -194,6 +196,16 @@ class TodoRepository(
     }
 
     suspend fun history(taskId: String): List<CompletionRecordEntity> = db.completions().forTask(taskId)
+
+    fun attachments(task: TaskEntity): List<com.alondra1.app.domain.TaskAttachment> = com.alondra1.app.domain.TaskAttachments.parse(task.attachmentsJson)
+
+    /** Adds imported files to a task (metadata; the bytes are already in the task-file store). */
+    suspend fun addAttachments(taskId: String, added: List<com.alondra1.app.domain.TaskAttachment>) =
+        if (added.isEmpty()) tasks.get(taskId) else mutate(taskId) { it.copy(attachmentsJson = com.alondra1.app.domain.TaskAttachments.add(it.attachmentsJson, added)) }
+
+    /** Removes an attachment from the task; its file is released later (Undo and other devices can still use it). */
+    suspend fun removeAttachment(taskId: String, attachmentId: String) =
+        mutate(taskId) { it.copy(attachmentsJson = com.alondra1.app.domain.TaskAttachments.remove(it.attachmentsJson, attachmentId)) }
 
     suspend fun setImportant(id: String, important: Boolean) = mutate(id) { it.copy(important = important) }
 

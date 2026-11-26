@@ -108,12 +108,20 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
     fun setSort(sort: TaskSort) { viewModelScope.launch { container.settings.setTaskSort(sort) } }
 
     /** Returns an error message, or null when the task was added. */
-    suspend fun quickAdd(title: String, dueDate: LocalDate?, important: Boolean): String? = try {
+    suspend fun quickAdd(title: String, dueDate: LocalDate?, important: Boolean): String? = add(NewTask(title, dueDate, important, null, emptyList()))
+
+    /**
+     * Adds a task from the composer with the screen's rules (My Day joins My Day, Important is starred, a task added
+     * in Planned without a date is due today) and the composer's choices on top. Returns an error message or null.
+     */
+    suspend fun add(new: NewTask): String? = try {
         when (val sel = selection.value) {
             is TodoSelection.View -> todo.addTask(
-                title, listId = container.settings.settings.first().defaultListId, view = sel.view, dueDate = dueDate, important = important,
+                new.title, listId = new.listId ?: container.settings.settings.first().defaultListId, view = sel.view,
+                dueDate = new.due ?: if (sel.view == SmartView.PLANNED) container.time.today() else null, important = new.important,
+                attachments = new.attachments,
             )
-            is TodoSelection.List -> todo.addTask(title, listId = sel.id, dueDate = dueDate, important = important)
+            is TodoSelection.List -> todo.addTask(new.title, listId = new.listId ?: sel.id, dueDate = new.due, important = new.important, attachments = new.attachments)
         }
         null
     } catch (e: InvalidTitleException) {

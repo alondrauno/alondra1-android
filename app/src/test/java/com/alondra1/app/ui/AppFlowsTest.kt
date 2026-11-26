@@ -2,11 +2,16 @@ package com.alondra1.app.ui
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
@@ -47,13 +52,75 @@ class AppFlowsTest {
 
     @Test fun myDayIsTheStartAndShowsAnEmptyState() {
         waitFor("viewSelector")
-        rule.onNodeWithText("My Day").assertIsDisplayed()
+        rule.onNodeWithTag("viewSelector").assertTextContains("My Day")
         rule.onNodeWithText("Nothing planned for today").assertIsDisplayed()
         rule.onNodeWithTag("bottomNav").assertIsDisplayed()
+        rule.onNodeWithTag("tab:My Day").assertIsSelected()
+    }
+
+    /** Android UI spec §4, §14: exactly My Day, Planned, Lists, Notes, in that order; no To-do, Important or Calendar tab. */
+    @Test fun bottomNavigationHasTheFourDestinationsInOrder() {
+        waitFor("bottomNav")
+        val tabs = rule.onAllNodes(hasTestTag("bottomNav")).fetchSemanticsNodes().single()
+        val labels = rule.onAllNodes(androidx.compose.ui.test.hasAnyAncestor(hasTestTag("bottomNav")) and androidx.compose.ui.test.hasClickAction())
+            .fetchSemanticsNodes().map { it.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag] }
+        assertEquals(listOf("tab:My Day", "tab:Planned", "tab:Lists", "tab:Notes"), labels)
+        assertTrue(tabs.size.height > 0)
+        listOf("tab:To-do", "tab:Important", "tab:Calendar").forEach { assertTrue(rule.onAllNodes(hasTestTag(it)).fetchSemanticsNodes().isEmpty()) }
+    }
+
+    @Test fun importantIsInListsAndTheCalendarInPlanned() {
+        runBlocking {
+            container.todo.addTask("Starred", important = true)
+            container.todo.addTask("Pay rent", dueDate = container.time.today())
+        }
+        waitFor("tab:Lists"); rule.onNodeWithTag("tab:Lists").performClick()
+        waitFor("smart:Important"); rule.onNodeWithTag("smart:Important").performClick()
+        waitFor("task:Starred")
+        rule.onNodeWithContentDescription("Back").performClick()
+        waitFor("tab:Planned"); rule.onNodeWithTag("tab:Planned").performClick()
+        waitFor("task:Pay rent")
+        assertTrue("grouped by date", rule.onAllNodes(hasText("Today")).fetchSemanticsNodes().isNotEmpty())
+        selectCalendar()
+        waitFor("calTask:Pay rent")
+        // The choice is kept when coming back to Planned.
+        rule.onNodeWithTag("tab:My Day").performClick(); waitFor("viewSelector")
+        rule.onNodeWithTag("tab:Planned").performClick()
+        waitFor("monthTitle")
+    }
+
+    @Test fun theCardShowsAttachmentsAndTheDetailListsThem() {
+        runBlocking {
+            val a = container.taskFiles.store("%PDF-1.7 x".byteInputStream(), "Ticket.pdf", null)
+            container.todo.addTask("Trip", view = com.alondra1.app.domain.SmartView.MY_DAY, attachments = listOf(a))
+        }
+        waitFor("task:Trip")
+        rule.onNodeWithTag("attachmentCount", useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag("task:Trip").performClick()
+        waitFor("attachments")
+        waitFor("attachment:Ticket.pdf")
+        rule.onNodeWithTag("addAttachment").assertIsDisplayed()
+    }
+
+    private fun startComposer() {
+        waitFor("composer")
+        rule.onNodeWithTag("composer").performClick()
+        waitFor("quickAdd")
+    }
+
+    @Test fun composerHasOnePrimaryActionAndClears() {
+        startComposer()
+        rule.onNodeWithTag("quickAddButton").assertIsNotEnabled()
+        rule.onNodeWithTag("quickAdd").performTextInput("Call mom")
+        rule.onNodeWithTag("quickAddButton").assertIsEnabled().performClick()
+        waitFor("task:Call mom")
+        rule.onNodeWithTag("quickAdd").assertTextContains("", substring = true)
+        rule.onNodeWithContentDescription("Close the composer").performClick()
+        waitFor("composer")
     }
 
     @Test fun quickAddCompleteAndUndo() {
-        waitFor("quickAdd")
+        startComposer()
         rule.onNodeWithTag("quickAdd").performTextInput("Buy milk")
         rule.onNodeWithTag("quickAdd").performImeAction()
         waitFor("task:Buy milk")
@@ -97,9 +164,23 @@ class AppFlowsTest {
         waitFor("note:Packing list")
     }
 
+    private fun openCalendar() {
+        waitFor("tab:Planned"); rule.onNodeWithTag("tab:Planned").performClick()
+        selectCalendar()
+    }
+
+    /** The List/Calendar switch, through its accessibility click (Robolectric drops the injected tap mid-transition). */
+    private fun selectCalendar() {
+        waitFor("plannedCalendar")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
+        rule.onNodeWithTag("plannedCalendar").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        rule.waitForIdle()
+        waitFor("monthTitle")
+    }
+
     @Test fun createEventFromCalendarAndSeeTasksOnTheSameDay() {
         runBlocking { container.todo.addTask("Pay rent", dueDate = container.time.today()) }
-        waitFor("tab:Calendar"); rule.onNodeWithTag("tab:Calendar").performClick()
+        openCalendar()
         waitFor("calTask:Pay rent")
         rule.onNodeWithTag("addEventOnDay").performClick()
         waitFor("eventTitle")
@@ -111,7 +192,7 @@ class AppFlowsTest {
     }
 
     @Test fun eventWithoutTitleShowsValidation() {
-        waitFor("tab:Calendar"); rule.onNodeWithTag("tab:Calendar").performClick()
+        openCalendar()
         waitFor("addEventOnDay"); rule.onNodeWithTag("addEventOnDay").performClick()
         waitFor("saveEvent"); rule.onNodeWithTag("saveEvent").performClick()
         waitFor("eventError")
@@ -137,8 +218,8 @@ class AppFlowsTest {
         runBlocking { container.settings.setTheme(ThemeMode.LIGHT) }
         RuntimeEnvironment.setFontScale(2.0f)
         rule.activityRule.scenario.recreate()
-        waitFor("quickAdd")
-        rule.onNodeWithTag("quickAdd").assertIsDisplayed()
+        waitFor("composer")
+        rule.onNodeWithTag("composer").assertIsDisplayed()
         rule.onNodeWithTag("bottomNav").assertIsDisplayed()
         RuntimeEnvironment.setFontScale(1.0f)
     }

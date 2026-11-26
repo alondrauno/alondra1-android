@@ -24,10 +24,11 @@ class BackgroundTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    @Test fun defaultsMatchWindows() {
+    @Test fun defaultsAreThePlainBackgroundWithWindowsAdjustments() {
         val s = BackgroundSettings()
         assertTrue(s.enabled)
-        assertEquals("mountains", s.image)
+        // Android UI spec §3.3: no picture behind the primary screens unless the user picks one.
+        assertEquals(BackgroundCatalog.NONE, s.image)
         assertEquals(0.85f, s.opacity)
         assertEquals(2f, s.blur)
         assertEquals(0.1f, s.desaturation)

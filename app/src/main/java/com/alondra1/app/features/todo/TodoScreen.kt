@@ -106,6 +106,17 @@ val SmartView.icon: ImageVector
         SmartView.UNSCHEDULED -> Icons.Filled.EventBusy
     }
 
+/** How a task screen titles itself. */
+fun TodoSelection.headerIcon(lists: List<com.alondra1.app.data.local.TaskListEntity>): ImageVector = when (this) {
+    is TodoSelection.View -> view.icon
+    is TodoSelection.List -> Icons.AutoMirrored.Filled.List
+}
+
+/**
+ * A task screen: My Day, Planned (grouped by date) and every list or smart list opened from Lists. Header, cards and
+ * composer follow the Android UI spec (§5); [onBack] is set for a list opened from Lists. [belowHeader] holds screen
+ * extras such as Planned's List/Calendar switch.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodoScreen(
@@ -114,68 +125,47 @@ fun TodoScreen(
     onSearch: () -> Unit,
     onSettings: () -> Unit,
     selectedTaskId: String? = null,
+    onBack: (() -> Unit)? = null,
+    belowHeader: @Composable () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = LocalSnackbar.current
     val scope = rememberCoroutineScope()
-    var showDestinations by rememberSaveable { mutableStateOf(false) }
-    var showSort by remember { mutableStateOf(false) }
-    var listMenu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var deletingList by remember { mutableStateOf(false) }
     var choosingGroup by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val selection = state.selection
+    val customList = (selection as? TodoSelection.List)?.let { sel -> state.lists.firstOrNull { it.id == sel.id } }
+    val open = state.tasks.count { !it.completed }
+
+    val menu = buildList {
+        TaskSort.entries.forEach { sort -> add(com.alondra1.app.design.MenuAction("Sort by " + sort.label.lowercase(), checked = sort == state.sort) { viewModel.setSort(sort) }) }
+        if (customList != null && !customList.isDefault) {
+            add(com.alondra1.app.design.MenuAction("Rename list") { renaming = true })
+            add(com.alondra1.app.design.MenuAction("Move to group…") { choosingGroup = true })
+            add(com.alondra1.app.design.MenuAction("Move list up") { viewModel.moveList(customList.id, -1) })
+            add(com.alondra1.app.design.MenuAction("Move list down") { viewModel.moveList(customList.id, 1) })
+            add(com.alondra1.app.design.MenuAction("Delete list", destructive = true) { deletingList = true })
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Column(
-                    Modifier
-                        .clickable { showDestinations = true }
-                        .semantics { contentDescription = "${state.title}. Choose a view or list" }
-                        .testTag("viewSelector"),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(state.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                    }
-                    if (state.selection == TodoSelection.View(SmartView.MY_DAY)) {
-                        Text(state.today.format(Format.longDate), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            },
-            actions = {
-                IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "Search") }
-                Box {
-                    IconButton(onClick = { showSort = true }) { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort") }
-                    DropdownMenu(expanded = showSort, onDismissRequest = { showSort = false }) {
-                        TaskSort.entries.forEach { sort ->
-                            DropdownMenuItem(
-                                text = { Text(sort.label + if (sort == state.sort) "  ✓" else "") },
-                                onClick = { viewModel.setSort(sort); showSort = false },
-                            )
-                        }
-                    }
-                }
-                val selection = state.selection
-                if (selection is TodoSelection.List && state.lists.firstOrNull { it.id == selection.id }?.isDefault == false) {
-                    Box {
-                        IconButton(onClick = { listMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "List options") }
-                        DropdownMenu(expanded = listMenu, onDismissRequest = { listMenu = false }) {
-                            DropdownMenuItem(text = { Text("Rename list") }, onClick = { listMenu = false; renaming = true })
-                            DropdownMenuItem(text = { Text("Move to group…") }, onClick = { listMenu = false; choosingGroup = true })
-                            DropdownMenuItem(text = { Text("Move up") }, onClick = { listMenu = false; viewModel.moveList(selection.id, -1) })
-                            DropdownMenuItem(text = { Text("Move down") }, onClick = { listMenu = false; viewModel.moveList(selection.id, 1) })
-                            DropdownMenuItem(text = { Text("Delete list") }, onClick = { listMenu = false; deletingList = true })
-                        }
-                    }
-                }
-                IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
-            },
+        com.alondra1.app.design.AppHeader(
+            title = state.title,
+            icon = selection.headerIcon(state.lists),
+            subtitle = if (selection == TodoSelection.View(SmartView.MY_DAY)) state.today.format(Format.longDate) else null,
+            count = if (open > 0) "$open open" else null,
+            onBack = onBack,
+            onSearch = onSearch,
+            onAccount = if (onBack == null) onSettings else null,
+            menu = menu,
+            titleModifier = Modifier.semantics(mergeDescendants = true) { }.testTag("viewSelector"),
         )
+        belowHeader()
 
         if (state.showsStatusFilter) {
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.padding(horizontal = com.alondra1.app.design.Space.screen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusFilter.entries.forEach { filter ->
                     FilterChip(selected = state.status == filter, onClick = { viewModel.setStatus(filter) }, label = { Text(filter.label) })
                 }
@@ -183,63 +173,62 @@ fun TodoScreen(
         }
 
         Box(Modifier.weight(1f)) {
+            val toggle: (TaskEntity) -> Unit = { task ->
+                scope.launch {
+                    val before = viewModel.setCompleted(task, !task.completed)
+                    if (before != null) snackbar.showUndo(if (!task.completed) "Completed" else "Marked as not completed") { viewModel.restore(before) }
+                }
+            }
             when {
                 state.error != null -> EmptyState(Icons.Filled.WarningAmber, "Something went wrong", state.error!!)
                 !state.loading && state.tasks.isEmpty() -> TodoEmpty(state)
                 else -> LazyColumn(
                     state = listState,
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = com.alondra1.app.design.Space.l, end = com.alondra1.app.design.Space.l, top = 2.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(com.alondra1.app.design.Space.cardGap),
                     modifier = Modifier.fillMaxSize().testTag("taskList"),
                 ) {
-                    items(state.tasks, key = { it.id }) { task ->
-                        TaskRow(
-                            task = task,
-                            listName = state.listNames[task.listId],
-                            showList = state.selection is TodoSelection.View,
-                            today = state.today,
-                            overdue = TaskRules.isOverdue(task, state.now),
-                            selected = task.id == selectedTaskId,
-                            onOpen = { onOpenTask(task.id) },
-                            onToggleComplete = {
-                                scope.launch {
-                                    val before = viewModel.setCompleted(task, !task.completed)
-                                    if (before != null) {
-                                        snackbar.showUndo(if (!task.completed) "Completed" else "Marked as not completed") { viewModel.restore(before) }
-                                    }
-                                }
-                            },
-                            onToggleImportant = { viewModel.setImportant(task, !task.important) },
-                        )
+                    val groups = if (selection == TodoSelection.View(SmartView.PLANNED)) plannedGroups(state.tasks, state.today) else listOf(null to state.tasks)
+                    groups.forEach { (label, tasks) ->
+                        if (label != null) item(key = "group:$label") {
+                            com.alondra1.app.design.SectionLabel(label, trailing = tasks.size.toString(), modifier = Modifier.padding(horizontal = 4.dp))
+                        }
+                        items(tasks, key = { it.id }) { task ->
+                            TaskRow(
+                                task = task,
+                                listName = state.listNames[task.listId],
+                                showList = state.selection is TodoSelection.View,
+                                inMyDay = selection == TodoSelection.View(SmartView.MY_DAY),
+                                // Planned groups by day: the card shows only the time, not the day again.
+                                dayInGroup = label != null && label != "Overdue",
+                                today = state.today,
+                                overdue = TaskRules.isOverdue(task, state.now),
+                                selected = task.id == selectedTaskId,
+                                onOpen = { onOpenTask(task.id) },
+                                onToggleComplete = { toggle(task) },
+                                onToggleImportant = { viewModel.setImportant(task, !task.important) },
+                            )
+                        }
                     }
                 }
             }
         }
 
-        QuickAddBar(
-            hint = when (val s = state.selection) {
+        TaskComposer(
+            hint = when (selection) {
                 TodoSelection.View(SmartView.MY_DAY) -> "Add a task to My Day"
                 TodoSelection.View(SmartView.IMPORTANT) -> "Add an important task"
+                TodoSelection.View(SmartView.PLANNED) -> "Add a task for today"
                 is TodoSelection.List -> "Add a task to ${state.title}"
                 else -> "Add a task"
             },
-            onAdd = { title, due, important -> viewModel.quickAdd(title, due, important) },
+            lists = state.lists,
+            chooseList = selection is TodoSelection.View,
+            onAdd = { viewModel.add(it) },
+            modifier = Modifier.imePadding(),
         )
     }
 
-    if (showDestinations) {
-        DestinationsSheet(
-            state = state,
-            onDismiss = { showDestinations = false },
-            onSelect = { viewModel.select(it); showDestinations = false },
-            onCreateList = { name -> scope.launch { viewModel.createList(name)?.let { viewModel.select(TodoSelection.List(it.id)) }; showDestinations = false } },
-            onCreateGroup = viewModel::createGroup,
-            onRenameGroup = viewModel::renameGroup,
-            onDeleteGroup = viewModel::deleteGroup,
-            onToggleGroup = viewModel::toggleGroup,
-        )
-    }
-    val selection = state.selection
     if (renaming && selection is TodoSelection.List) {
         NameDialog(title = "Rename list", initial = state.title, confirm = "Rename", onDismiss = { renaming = false }) {
             viewModel.renameList(selection.id, it); renaming = false
@@ -256,7 +245,7 @@ fun TodoScreen(
                     state.groups.forEach { g ->
                         TextButton(onClick = { viewModel.setListGroup(selection.id, g.id); choosingGroup = false }) { Text((if (current == g.id) "✓ " else "") + g.name) }
                     }
-                    if (state.groups.isEmpty()) Text("Create a group with New group in the lists sheet.", style = MaterialTheme.typography.bodySmall)
+                    if (state.groups.isEmpty()) Text("Create a group with New group on the Lists screen.", style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = { TextButton(onClick = { choosingGroup = false }) { Text("Close") } },
@@ -267,10 +256,10 @@ fun TodoScreen(
             onDismissRequest = { deletingList = false },
             title = { Text("Delete \"${state.title}\"?") },
             text = { Text("Its tasks can move to Tasks (recommended), or be deleted with the list.") },
-            confirmButton = { TextButton(onClick = { viewModel.deleteList(selection.id, moveTasks = true); deletingList = false }) { Text("Move tasks and delete") } },
+            confirmButton = { TextButton(onClick = { viewModel.deleteList(selection.id, moveTasks = true); deletingList = false; onBack?.invoke() }) { Text("Move tasks and delete") } },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { viewModel.deleteList(selection.id, moveTasks = false); deletingList = false }) {
+                    TextButton(onClick = { viewModel.deleteList(selection.id, moveTasks = false); deletingList = false; onBack?.invoke() }) {
                         Text("Delete tasks too", color = MaterialTheme.colorScheme.error)
                     }
                     TextButton(onClick = { deletingList = false }) { Text("Cancel") }
@@ -280,18 +269,30 @@ fun TodoScreen(
     }
 }
 
+/** Planned: overdue first, then one group per due day (Today, Tomorrow, dates), in date order. */
+fun plannedGroups(tasks: List<TaskEntity>, today: LocalDate): List<Pair<String?, List<TaskEntity>>> {
+    val dated = tasks.filter { it.dueDate != null }
+    val overdue = dated.filter { it.dueDate!! < today && !it.completed }
+    val rest = (dated - overdue.toSet()).groupBy { it.dueDate!! }.toSortedMap()
+    return buildList {
+        if (overdue.isNotEmpty()) add("Overdue" to overdue)
+        rest.forEach { (day, items) -> add(Format.relativeDate(day, today) to items) }
+        tasks.filter { it.dueDate == null }.takeIf { it.isNotEmpty() }?.let { add("No date" to it) }
+    }
+}
+
 @Composable
 private fun TodoEmpty(state: TodoUiState) {
     val (title, body) = when (state.selection) {
-        TodoSelection.View(SmartView.MY_DAY) -> "Nothing planned for today" to "Add a task below, or add tasks to My Day from any list."
+        TodoSelection.View(SmartView.MY_DAY) -> "Nothing planned for today" to "Add a task to get started."
         TodoSelection.View(SmartView.IMPORTANT) -> "No important tasks" to "Star a task to see it here."
-        TodoSelection.View(SmartView.PLANNED), TodoSelection.View(SmartView.UPCOMING) -> "No dated tasks" to "Give a task a due date to plan it."
+        TodoSelection.View(SmartView.PLANNED), TodoSelection.View(SmartView.UPCOMING) -> "Nothing planned" to "Give a task a due date to plan it."
         TodoSelection.View(SmartView.OVERDUE) -> "Nothing overdue" to "You are on track."
         TodoSelection.View(SmartView.COMPLETED) -> "No completed tasks yet" to "Completed tasks appear here."
         TodoSelection.View(SmartView.UNSCHEDULED) -> "No unscheduled tasks" to "Tasks without a due date appear here."
-        else -> "No tasks here" to "Add your first task below."
+        else -> "No tasks here" to "Add a task to get started."
     }
-    EmptyState(Icons.Outlined.TaskAlt, title, body)
+    com.alondra1.app.design.CompactEmptyState(state.selection.headerIcon(state.lists), title, body)
 }
 
 @Composable
@@ -305,208 +306,116 @@ fun TaskRow(
     onToggleComplete: () -> Unit,
     onToggleImportant: () -> Unit,
     selected: Boolean = false,
+    inMyDay: Boolean = false,
+    dayInGroup: Boolean = false,
 ) {
-    val extra = LocalExtra.current
     val is24 = is24Hour()
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClickLabel = "Open task", onClick = onOpen).testTag("task:${task.title}"),
-    ) {
-        Row(Modifier.padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onToggleComplete) {
-                Icon(
-                    if (task.completed) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
-                    contentDescription = if (task.completed) "Mark ${task.title} as not completed" else "Complete ${task.title}",
-                    tint = if (task.completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    task.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textDecoration = if (task.completed) TextDecoration.LineThrough else null,
-                    color = if (task.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val meta = buildList {
-                    if (task.myDayDate == today && !task.completed) add("My Day")
-                    if (showList && listName != null) add(listName)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (meta.isNotEmpty()) {
-                        Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                    }
-                    task.dueDate?.let { due ->
-                        if (meta.isNotEmpty()) Text(" · ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(14.dp),
-                            tint = if (overdue) extra.overdue else MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(3.dp))
-                        Text(
-                            Format.relativeDate(due, today) + (task.dueTime?.let { " " + Format.time(it, is24) } ?: ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (overdue) extra.overdue else MaterialTheme.colorScheme.primary,
-                            fontWeight = if (overdue) FontWeight.SemiBold else null,
-                        )
-                    }
-                    if (task.remindersJson != "[]" && !task.completed) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Filled.Notifications, contentDescription = "Has a reminder", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-            IconToggleButton(checked = task.important, onCheckedChange = { onToggleImportant() }) {
-                Icon(
-                    if (task.important) Icons.Filled.Star else Icons.Filled.StarBorder,
-                    contentDescription = if (task.important) "Remove importance" else "Mark as important",
-                    tint = if (task.important) extra.star else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
+    val steps = remember(task.stepsJson) { com.alondra1.app.domain.TaskJson.steps(task.stepsJson) }
+    val meta = com.alondra1.app.design.CardMeta(
+        parts = buildList {
+            if (task.myDayDate == today && !task.completed && !inMyDay) add("My Day")
+            if (showList && listName != null) add(listName)
+        },
+        due = task.dueDate?.let { d ->
+            if (dayInGroup) task.dueTime?.let { t -> Format.time(t, is24) }
+            else Format.relativeDate(d, today) + (task.dueTime?.let { t -> " " + Format.time(t, is24) } ?: "")
+        },
+        overdue = overdue,
+        repeats = task.recurrenceJson != null,
+        reminder = task.remindersJson != "[]" && !task.completed,
+        attachments = com.alondra1.app.domain.TaskAttachments.count(task.attachmentsJson),
+        stepsDone = steps.count { it.completed },
+        stepsTotal = steps.size,
+    )
+    com.alondra1.app.design.TaskCard(
+        title = task.title, completed = task.completed, important = task.important, meta = meta,
+        onOpen = onOpen, onToggleComplete = onToggleComplete, onToggleImportant = onToggleImportant,
+        selected = selected, modifier = Modifier.testTag("task:${task.title}"),
+    )
 }
 
+/** Smart lists shown on the Lists screen (My Day and Planned have their own tabs). */
+val LIST_SMART_VIEWS = listOf(SmartView.IMPORTANT, SmartView.UPCOMING, SmartView.OVERDUE, SmartView.UNSCHEDULED, SmartView.ALL, SmartView.COMPLETED)
+
+/**
+ * The Lists destination (Android UI spec §6): smart lists (Important first), then the user's lists and groups with
+ * open counts, and one clear way to create a list or a group. Opening an entry shows it as a task screen.
+ */
 @Composable
-fun QuickAddBar(hint: String, onAdd: suspend (String, LocalDate?, Boolean) -> String?) {
-    var text by rememberSaveable { mutableStateOf("") }
-    var due by rememberSaveable { mutableStateOf<LocalDate?>(null) }
-    var important by rememberSaveable { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var picking by remember { mutableStateOf(false) }
+fun ListsScreen(viewModel: TodoViewModel, onOpen: (TodoSelection) -> Unit, onSearch: () -> Unit, onSettings: () -> Unit) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val today = LocalDate.now()
-    fun submit() {
-        if (text.isBlank()) return
-        scope.launch {
-            error = onAdd(text, due, important)
-            if (error == null) { text = ""; due = null; important = false }
-        }
-    }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 2.dp, modifier = Modifier.imePadding()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = text,
-                    onValueChange = { text = it.take(TaskRules.TITLE_MAX); error = null },
-                    placeholder = { Text(hint) },
-                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submit() }),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    ),
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.weight(1f).testTag("quickAdd"),
-                )
-                IconButton(onClick = { picking = true }) { Icon(Icons.Filled.CalendarMonth, contentDescription = "Set a due date") }
-                IconToggleButton(checked = important, onCheckedChange = { important = it }) {
-                    Icon(if (important) Icons.Filled.Star else Icons.Filled.StarBorder, contentDescription = "Important",
-                        tint = if (important) LocalExtra.current.star else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                TextButton(onClick = { submit() }, enabled = text.isNotBlank(), modifier = Modifier.testTag("quickAddButton")) { Text("Add") }
-            }
-            if (due != null) {
-                AssistChip(
-                    onClick = { due = null },
-                    label = { Text("Due " + Format.relativeDate(due!!, today)) },
-                    trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove due date", modifier = Modifier.size(16.dp)) },
-                )
-            }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        }
-    }
-    if (picking) DatePickerDialogFor(due ?: today, onDismiss = { picking = false }, onPicked = { due = it })
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DestinationsSheet(
-    state: TodoUiState,
-    onDismiss: () -> Unit,
-    onSelect: (TodoSelection) -> Unit,
-    onCreateList: (String) -> Unit,
-    onCreateGroup: (String) -> Unit = {},
-    onRenameGroup: (String, String) -> Unit = { _, _ -> },
-    onDeleteGroup: (String) -> Unit = {},
-    onToggleGroup: (String, Boolean) -> Unit = { _, _ -> },
-) {
     var creating by remember { mutableStateOf(false) }
     var creatingGroup by remember { mutableStateOf(false) }
     var renamingGroup by remember { mutableStateOf<com.alondra1.app.data.local.ListGroupEntity?>(null) }
     val groupIds = state.groups.map { it.id }.toSet()
     val ungrouped = state.lists.filter { it.groupId == null || it.groupId !in groupIds }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.testTag("destinations")) {
-            items(SmartView.entries) { view ->
-                DestinationRow(view.icon, view.title, state.counts[view] ?: 0, state.selection == TodoSelection.View(view)) {
-                    onSelect(TodoSelection.View(view))
-                }
+    val gap = com.alondra1.app.design.Space.s
+
+    Column(Modifier.fillMaxSize()) {
+        com.alondra1.app.design.AppHeader(
+            title = "Lists", icon = Icons.AutoMirrored.Filled.List, onSearch = onSearch, onAccount = onSettings,
+            menu = listOf(
+                com.alondra1.app.design.MenuAction("New list") { creating = true },
+                com.alondra1.app.design.MenuAction("New group") { creatingGroup = true },
+            ),
+        )
+        LazyColumn(
+            contentPadding = PaddingValues(start = com.alondra1.app.design.Space.l, end = com.alondra1.app.design.Space.l, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(gap),
+            modifier = Modifier.fillMaxSize().testTag("destinations"),
+        ) {
+            items(LIST_SMART_VIEWS, key = { "view:" + it.name }) { view ->
+                com.alondra1.app.design.ListRow(
+                    view.icon, view.title, state.counts[view] ?: 0, onClick = { onOpen(TodoSelection.View(view)) },
+                    iconTint = if (view == SmartView.IMPORTANT) LocalExtra.current.star else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag("smart:${view.title}"),
+                )
             }
-            item {
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Lists", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
-            }
+            item(key = "my-lists") { com.alondra1.app.design.SectionLabel("My lists", modifier = Modifier.padding(horizontal = 4.dp)) }
             items(ungrouped, key = { it.id }) { list ->
-                DestinationRow(Icons.AutoMirrored.Filled.List, list.name, state.listCounts[list.id] ?: 0, state.selection == TodoSelection.List(list.id)) {
-                    onSelect(TodoSelection.List(list.id))
-                }
+                com.alondra1.app.design.ListRow(Icons.AutoMirrored.Filled.List, list.name, state.listCounts[list.id] ?: 0, onClick = { onOpen(TodoSelection.List(list.id)) },
+                    modifier = Modifier.testTag("list:${list.name}"))
             }
             state.groups.forEach { group ->
                 item(key = "group-" + group.id) {
                     var menu by remember { mutableStateOf(false) }
                     Row(verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable { onToggleGroup(group.id, !group.collapsed) }.padding(start = 24.dp, end = 8.dp).testTag("group")) {
-                        Text((if (group.collapsed) "▸ " else "▾ ") + group.name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (group.collapsed) "Expand group" else "Collapse group") {
+                            viewModel.toggleGroup(group.id, !group.collapsed)
+                        }.padding(start = 4.dp).testTag("group")) {
+                        Text((if (group.collapsed) "▸ " else "▾ ") + group.name, style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Group options for ${group.name}") }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 DropdownMenuItem(text = { Text("Rename group") }, onClick = { menu = false; renamingGroup = group })
-                                DropdownMenuItem(text = { Text("Remove group (keeps its lists)") }, onClick = { menu = false; onDeleteGroup(group.id) })
+                                DropdownMenuItem(text = { Text("Remove group (keeps its lists)") }, onClick = { menu = false; viewModel.deleteGroup(group.id) })
                             }
                         }
                     }
                 }
                 if (!group.collapsed) items(state.lists.filter { it.groupId == group.id }, key = { it.id }) { list ->
-                    DestinationRow(Icons.AutoMirrored.Filled.List, list.name, state.listCounts[list.id] ?: 0, state.selection == TodoSelection.List(list.id)) {
-                        onSelect(TodoSelection.List(list.id))
-                    }
+                    com.alondra1.app.design.ListRow(Icons.AutoMirrored.Filled.List, list.name, state.listCounts[list.id] ?: 0, onClick = { onOpen(TodoSelection.List(list.id)) },
+                        modifier = Modifier.padding(start = 12.dp).testTag("list:${list.name}"))
                 }
             }
-            item {
-                Row {
-                    TextButton(onClick = { creating = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("New list")
+            item(key = "create") {
+                Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.padding(top = 4.dp)) {
+                    androidx.compose.material3.FilledTonalButton(onClick = { creating = true }, modifier = Modifier.testTag("newList")) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("New list")
                     }
-                    TextButton(onClick = { creatingGroup = true }) { Text("New group") }
+                    androidx.compose.material3.OutlinedButton(onClick = { creatingGroup = true }) { Text("New group") }
                 }
             }
         }
     }
-    if (creating) NameDialog(title = "New list", initial = "", confirm = "Create", onDismiss = { creating = false }) { onCreateList(it); creating = false }
-    if (creatingGroup) NameDialog(title = "New group", initial = "", confirm = "Create", onDismiss = { creatingGroup = false }) { onCreateGroup(it); creatingGroup = false }
-    renamingGroup?.let { g -> NameDialog(title = "Rename group", initial = g.name, confirm = "Rename", onDismiss = { renamingGroup = null }) { onRenameGroup(g.id, it); renamingGroup = null } }
-}
-
-@Composable
-private fun DestinationRow(icon: ImageVector, label: String, count: Int, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(min = 48.dp).clickable(onClick = onClick),
-    ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(16.dp))
-            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            if (count > 0) Text(count.toString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+    if (creating) NameDialog(title = "New list", initial = "", confirm = "Create", onDismiss = { creating = false }) { name ->
+        creating = false
+        scope.launch { viewModel.createList(name)?.let { onOpen(TodoSelection.List(it.id)) } }
     }
+    if (creatingGroup) NameDialog(title = "New group", initial = "", confirm = "Create", onDismiss = { creatingGroup = false }) { viewModel.createGroup(it); creatingGroup = false }
+    renamingGroup?.let { g -> NameDialog(title = "Rename group", initial = g.name, confirm = "Rename", onDismiss = { renamingGroup = null }) { viewModel.renameGroup(g.id, it); renamingGroup = null } }
 }
 
 @Composable

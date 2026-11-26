@@ -18,14 +18,29 @@ import java.time.DayOfWeek
 
 enum class ThemeMode(val label: String) { SYSTEM("Follow system"), LIGHT("Light"), DARK("Dark") }
 enum class TimeFormat(val label: String) { SYSTEM("Follow system"), H12("12-hour"), H24("24-hour") }
-enum class Tab(val route: String) { TODO("todo"), NOTES("notes"), CALENDAR("calendar") }
+/**
+ * The four primary destinations, in bottom-bar order (Android UI spec §4). Calendar lives inside Planned, Important
+ * inside Lists. [parse] maps the destinations of earlier versions (To-do, Calendar) so the app reopens where it was.
+ */
+enum class Tab(val route: String) {
+    MY_DAY("myday"), PLANNED("planned"), LISTS("lists"), NOTES("notes");
+
+    companion object {
+        fun parse(stored: String?): Tab = when (stored) {
+            null -> MY_DAY
+            "TODO" -> MY_DAY
+            "CALENDAR" -> PLANNED
+            else -> entries.firstOrNull { it.name == stored } ?: MY_DAY
+        }
+    }
+}
 
 data class Settings(
     val theme: ThemeMode = ThemeMode.DARK,
     val firstDayOfWeek: DayOfWeek? = null,
     val timeFormat: TimeFormat = TimeFormat.SYSTEM,
     val defaultListId: String? = null,
-    val lastTab: Tab = Tab.TODO,
+    val lastTab: Tab = Tab.MY_DAY,
     val onboardingComplete: Boolean = false,
     val taskSort: TaskSort = TaskSort.DUE_DATE,
     val privateNotifications: Boolean = true,
@@ -66,13 +81,13 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
                 firstDayOfWeek = p[Keys.firstDay]?.let { runCatching { DayOfWeek.valueOf(it) }.getOrNull() },
                 timeFormat = enumOr(p[Keys.timeFormat], TimeFormat.SYSTEM),
                 defaultListId = p[Keys.defaultList],
-                lastTab = enumOr(p[Keys.lastTab], Tab.TODO),
+                lastTab = Tab.parse(p[Keys.lastTab]),
                 onboardingComplete = p[Keys.onboarding] ?: false,
                 taskSort = enumOr(p[Keys.sort], TaskSort.DUE_DATE),
                 privateNotifications = p[Keys.privateNotifications] ?: true,
                 background = BackgroundSettings(
                     enabled = p[Keys.bgEnabled] ?: true,
-                    image = p[Keys.bgImage] ?: BackgroundCatalog.DEFAULT,
+                    image = p[Keys.bgImage] ?: BackgroundCatalog.NONE,
                     customPath = p[Keys.bgCustomPath],
                     opacity = p[Keys.bgOpacity] ?: BackgroundSettings.DEFAULT_OPACITY,
                     blur = p[Keys.bgBlur] ?: BackgroundSettings.DEFAULT_BLUR,

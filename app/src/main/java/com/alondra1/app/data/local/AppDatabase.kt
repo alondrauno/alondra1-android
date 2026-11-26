@@ -12,8 +12,9 @@ import androidx.room.TypeConverters
  */
 @Database(
     entities = [TaskListEntity::class, TaskEntity::class, NoteEntity::class, EventEntity::class, OutboxEntity::class, SyncIssueEntity::class,
-        NoteFts::class, NoteFolderEntity::class, NoteAssetEntity::class, ListGroupEntity::class, CompletionRecordEntity::class],
-    version = 5,
+        NoteFts::class, NoteFolderEntity::class, NoteAssetEntity::class, ListGroupEntity::class, CompletionRecordEntity::class,
+        TaskFileEntity::class],
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -28,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun noteAssets(): NoteAssetDao
     abstract fun listGroups(): ListGroupDao
     abstract fun completions(): CompletionDao
+    abstract fun taskFiles(): TaskFileDao
 
     companion object {
         const val NAME = "alondra1.db"
@@ -103,7 +105,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        /**
+         * 5 -> 6: task attachments (Android UI and task attachments spec §8). Attachments become a task column; the
+         * ones other clients already synced (kept until now inside remoteJson) are copied into it, so none is lost or
+         * dropped by the next upload. Files attached here are indexed in task_files.
+         */
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `attachmentsJson` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `task_files` (`sha256` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `bytes` INTEGER NOT NULL, `createdUtc` INTEGER NOT NULL, `uploaded` INTEGER NOT NULL, `present` INTEGER NOT NULL, `lastError` TEXT, PRIMARY KEY(`sha256`))")
+                val copies = mutableListOf<Pair<String, String>>()
+                db.query("SELECT `id`, `remoteJson` FROM `tasks` WHERE `remoteJson` LIKE '%\"attachments\"%'").use { c ->
+                    while (c.moveToNext()) {
+                        val attachments = runCatching { org.json.JSONObject(c.getString(1)).optJSONArray("attachments") }.getOrNull()
+                        if (attachments != null && attachments.length() > 0) copies += c.getString(0) to attachments.toString()
+                    }
+                }
+                copies.forEach { (id, json) -> db.execSQL("UPDATE `tasks` SET `attachmentsJson` = ? WHERE `id` = ?", arrayOf<Any>(json, id)) }
+            }
+        }
+
+        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
         fun build(context: Context, name: String? = NAME): AppDatabase {
             val builder = if (name == null) {

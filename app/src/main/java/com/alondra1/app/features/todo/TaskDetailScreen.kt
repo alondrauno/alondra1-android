@@ -390,6 +390,9 @@ private fun TaskDetailBody(viewModel: TaskDetailViewModel, task: TaskEntity, lis
             modifier = Modifier.fillMaxWidth().testTag("taskNotes"),
         )
 
+        // Files attached to the task (metadata syncs with the task; the bytes separately).
+        AttachmentsSection(task.id, task.attachmentsJson, Modifier.padding(top = 4.dp))
+
         val fmt = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
         Text(
             "Created " + task.createdUtc.atZone(viewModel.zone()).format(fmt) + "\nUpdated " + task.modifiedUtc.atZone(viewModel.zone()).format(fmt),

@@ -221,26 +221,20 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
         containerColor = androidx.compose.ui.graphics.Color.Transparent, // the workspace background shows through
         contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(Modifier.clickable(onClickLabel = "Choose a view or folder") { chooser = true }.testTag("noteViews"), verticalAlignment = Alignment.CenterVertically) {
-                        Text(state.heading, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            // Shared header (Android UI spec §6): the title opens views and folders; sort and Empty trash are secondary.
+            com.alondra1.app.design.AppHeader(
+                title = state.heading,
+                icon = Icons.Outlined.StickyNote2,
+                onSearch = onSearch,
+                onAccount = onSettings,
+                menu = buildList {
+                    add(com.alondra1.app.design.MenuAction("Views and folders…") { chooser = true })
+                    listOf(NoteSort.MODIFIED to "Last edited", NoteSort.CREATED to "Date created", NoteSort.TITLE to "Title").forEach { (s, label) ->
+                        add(com.alondra1.app.design.MenuAction("Sort by " + label.lowercase(), checked = s == state.sort) { viewModel.sort(s) })
                     }
+                    if (state.view == NoteView.TRASH && state.notes.isNotEmpty()) add(com.alondra1.app.design.MenuAction("Empty trash", destructive = true) { confirmEmpty = true })
                 },
-                actions = {
-                    Box {
-                        IconButton(onClick = { sortMenu = true }) { Icon(Icons.Filled.Sort, contentDescription = "Sort notes") }
-                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                            listOf(NoteSort.MODIFIED to "Last edited", NoteSort.CREATED to "Date created", NoteSort.TITLE to "Title").forEach { (s, label) ->
-                                DropdownMenuItem(text = { Text(if (s == state.sort) "✓ $label" else label) }, onClick = { sortMenu = false; viewModel.sort(s) })
-                            }
-                        }
-                    }
-                    if (state.view == NoteView.TRASH && state.notes.isNotEmpty()) IconButton(onClick = { confirmEmpty = true }) { Icon(Icons.Filled.Delete, contentDescription = "Empty trash") }
-                    IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "Search everything") }
-                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
-                },
+                titleModifier = Modifier.clickable(onClickLabel = "Choose a view or folder") { chooser = true }.testTag("noteViews"),
             )
         },
         floatingActionButton = {

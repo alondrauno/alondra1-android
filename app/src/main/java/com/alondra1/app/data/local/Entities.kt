@@ -94,6 +94,27 @@ data class TaskEntity(
     val stepsJson: String = "[]",
     /** Contract reminders (definitions: id and local wall-clock time) as a JSON array. */
     val remindersJson: String = "[]",
+    /**
+     * Contract attachments (metadata only, domain/TaskAttachments.kt) as a JSON array. Entries keep keys other clients
+     * wrote (Windows' relativePath). The bytes live in [TaskFileEntity] files, never here.
+     */
+    val attachmentsJson: String = "[]",
+)
+
+/**
+ * A file attached to a task, stored once per SHA-256 below files/task-files (app-private). [uploaded] = known to be in
+ * cloud storage; [present] = the bytes are on this device (false for a file added on another device and not
+ * downloaded yet, or removed from this device to free space). [lastError]: why the last upload failed for good.
+ */
+@Entity(tableName = "task_files")
+data class TaskFileEntity(
+    @PrimaryKey val sha256: String,
+    val mimeType: String,
+    val bytes: Long,
+    val createdUtc: Instant,
+    val uploaded: Boolean = false,
+    val present: Boolean = true,
+    val lastError: String? = null,
 )
 
 /**

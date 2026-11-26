@@ -75,20 +75,10 @@ object Format {
 @Composable
 fun is24Hour(): Boolean = Format.is24(LocalContext.current, LocalTimeFormat.current)
 
+/** Empty states everywhere use the compact design (Android UI spec §5.3). */
 @Composable
-fun EmptyState(icon: ImageVector, title: String, body: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(16.dp))
-        Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(6.dp))
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-    }
-}
+fun EmptyState(icon: ImageVector, title: String, body: String, modifier: Modifier = Modifier) =
+    com.alondra1.app.design.CompactEmptyState(icon, title, body, modifier)
 
 /** UTC-millis bridge for Material 3 date pickers, which work on UTC midnight. */
 object PickerDates {

@@ -41,6 +41,10 @@ class SyncEngineTest {
     @Volatile private var bootstrapItems = "[]"
     @Volatile private var pushResponder: (JsonObject) -> MockResponse = { appliedAll(it) }
     @Volatile private var changes = "[]"
+    /** Every request path in order, and the bytes PUT to /v1/task-files. */
+    private val requests = Collections.synchronizedList(mutableListOf<String>())
+    private val uploaded = Collections.synchronizedMap(mutableMapOf<String, ByteArray>())
+    @Volatile private var fileUploadStatus = 201
     private lateinit var session: SessionStore
     private lateinit var engine: SyncEngine
     private lateinit var c: AppContainer
@@ -66,7 +70,16 @@ class SyncEngineTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path.orEmpty()
+                requests += request.method + " " + path
                 return when {
+                    path.startsWith("/v1/task-files/limits") -> json("""{"max_file_bytes":1048576,"max_per_task":4,"quota_bytes":0,"space_used_bytes":0}""")
+                    path.startsWith("/v1/task-files/") && request.method == "PUT" -> {
+                        uploaded[path.removePrefix("/v1/task-files/")] = request.body.readByteArray()
+                        if (fileUploadStatus == 201) json("""{"id":"x","mime_type":"application/pdf","bytes":1,"created_at":"2026-11-23T10:00:00Z"}""", 201)
+                        else json("""{"error":{"code":"FILE_TOO_LARGE","message":"A file can be at most 25 MB."}}""", fileUploadStatus)
+                    }
+                    path.startsWith("/v1/task-files/") && request.method == "GET" -> uploaded[path.removePrefix("/v1/task-files/")]
+                        ?.let { MockResponse().setResponseCode(200).setBody(okio.Buffer().write(it)) } ?: json("""{"error":{"code":"NOT_FOUND","message":"no"}}""", 404)
                     path.startsWith("/v1/sync/bootstrap") -> json("""{"items":$bootstrapItems,"cursor":"c1"}""")
                     path.startsWith("/v1/sync/push") -> {
                         val body = WireMapper.json.parseToJsonElement(request.body.readUtf8()).jsonObject
@@ -261,6 +274,61 @@ class SyncEngineTest {
         val record = c.db.completions().forTask("t-other").single()
         assertEquals("Water plants", record.title)
         assertTrue(record.sent)
+    }
+
+    private fun engineWithFiles(): com.alondra1.app.data.repository.TaskFiles {
+        val files = com.alondra1.app.data.repository.TaskFiles(c.db, java.io.File(TestSupport.context().cacheDir, "tf-${System.nanoTime()}"), c.time)
+        engine = SyncEngine(c.db, ApiClient(server.url("/").toString(), session), session, c.time, RecordingReminderScheduler(), null, null, files)
+        return files
+    }
+
+    @Test fun taskFilesGoUpBeforeTheTaskThatListsThem() = runBlocking<Unit> {
+        val files = engineWithFiles()
+        val pdf = "%PDF-1.7 attachment".toByteArray()
+        val a = files.store(pdf.inputStream(), "ticket.pdf", null)
+        val task = c.todo.addTask("Trip", attachments = listOf(a))
+        engine.enable(tenant)
+
+        val put = requests.indexOfFirst { it == "PUT /v1/task-files/${a.sha256}" }
+        val push = requests.indexOfFirst { it.startsWith("POST /v1/sync/push") }
+        assertTrue("uploaded before the push: $requests", put in 0 until push)
+        assertTrue(uploaded[a.sha256]!!.contentEquals(pdf))
+        assertTrue(c.db.taskFiles().get(a.sha256!!)!!.uploaded)
+        val sentTask = pushes.flatMap { it["mutations"]!!.jsonArray }.map { it.jsonObject }.single { it["resource_id"]!!.jsonPrimitive.content == task.id }
+        assertEquals(a.sha256, sentTask["resource"]!!.jsonObject["attachments"]!!.jsonArray[0].jsonObject["sha256"]!!.jsonPrimitive.content)
+        assertEquals("the server's limits are adopted", 4, com.alondra1.app.data.repository.TaskFiles.limitPerTask)
+        com.alondra1.app.data.repository.TaskFiles.limitPerTask = com.alondra1.app.domain.TaskAttachments.DEFAULT_MAX_PER_TASK
+        com.alondra1.app.data.repository.TaskFiles.limitBytes = com.alondra1.app.domain.TaskAttachments.DEFAULT_MAX_BYTES
+
+        // Uploaded once: a later sync does not resend it.
+        requests.clear()
+        c.todo.updateTask(c.todo.getTask(task.id)!!.copy(title = "Trip to Rome"))
+        engine.syncNow()
+        assertTrue(requests.none { it.startsWith("PUT /v1/task-files/") })
+    }
+
+    @Test fun aRefusedFileIsMarkedAndTheTaskStillSyncs() = runBlocking<Unit> {
+        val files = engineWithFiles()
+        fileUploadStatus = 413
+        val a = files.store("big".byteInputStream(), "big.bin", null)
+        val task = c.todo.addTask("Big", attachments = listOf(a))
+        val status = engine.enable(tenant)
+        assertEquals(SyncState.SYNCED, status.state)
+        assertEquals("A file can be at most 25 MB.", c.db.taskFiles().get(a.sha256!!)!!.lastError)
+        assertNotNull(c.db.tasks().get(task.id)!!.serverVersion)
+    }
+
+    @Test fun aFileFromAnotherDeviceDownloadsOnDemandAndIsVerified() = runBlocking<Unit> {
+        val files = engineWithFiles()
+        engine.enable(tenant)
+        val bytes = "from windows".toByteArray()
+        val sha = com.alondra1.app.data.repository.TaskFiles.hash(bytes)
+        assertEquals("not in the cloud yet", false, engine.downloadTaskFile(sha, "text/plain"))
+        uploaded[sha] = bytes
+        assertTrue(engine.downloadTaskFile(sha, "text/plain"))
+        assertTrue(files.hasFile(sha))
+        uploaded["f".repeat(64)] = bytes
+        assertEquals("bytes that do not match are not kept", false, engine.downloadTaskFile("f".repeat(64), null))
     }
 }
 

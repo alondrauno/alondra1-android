@@ -30,7 +30,7 @@ import java.time.format.DateTimeFormatter
  * Converts local records to the shared wire formats (contract/schemas: todo-v1, notes-v1, calendar-v1) and back.
  *
  * Outgoing objects start from the last server copy ([TaskEntity.remoteJson]) so fields this app does not edit
- * (attachments, unknown fields, unknown keys inside steps) are sent back unchanged instead of being erased.
+ * (unknown fields, unknown keys inside steps and attachments) are sent back unchanged instead of being erased.
  */
 object WireMapper {
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -71,6 +71,8 @@ object WireMapper {
         m["subtasks"] = json.parseToJsonElement(t.stepsJson)
         // Reminder definitions only (id, at): delivery state is per device and never synced.
         m["reminders"] = buildJsonArray { (json.parseToJsonElement(t.remindersJson) as? JsonArray).orEmpty().forEach { add(stripReminderState(it)) } }
+        // Metadata only; entries keep keys other clients wrote (Windows' relativePath). Bytes go to /v1/task-files.
+        m["attachments"] = JsonArray(com.alondra1.app.domain.TaskAttachments.array(t.attachmentsJson))
         return JsonObject(m)
     }
 
@@ -193,6 +195,7 @@ object WireMapper {
             recurrenceJson = (o["recurrence"] as? JsonObject)?.toString(),
             stepsJson = (o["subtasks"] as? JsonArray)?.toString() ?: "[]",
             remindersJson = (o["reminders"] as? JsonArray)?.let { a -> JsonArray(a.map(::stripReminderState)).toString() } ?: "[]",
+            attachmentsJson = (o["attachments"] as? JsonArray)?.toString() ?: "[]",
             sourceNoteId = local?.sourceNoteId,
             deletedUtc = null,
             remoteJson = o.toString(),

@@ -25,6 +25,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
@@ -52,6 +53,8 @@ class SyncEngine(
     private val backupDir: File?,
     /** Pictures in notes (null: notes sync without pictures, e.g. in tests that do not need them). */
     private val assets: com.alondra1.app.data.repository.NoteAssets? = null,
+    /** Files attached to tasks (null: tasks sync with their attachment metadata only). */
+    private val taskFiles: com.alondra1.app.data.repository.TaskFiles? = null,
 ) {
     private val lock = Mutex()
     private val sync = db.sync()
@@ -178,6 +181,7 @@ class SyncEngine(
                 push(s.tenantId)
                 pull(s.tenantId)
                 downloadAssets(s.tenantId)
+                refreshTaskFileLimits(s.tenantId)
                 // Conflict copies are created while pushing: send them in this same run, not at the next sync.
                 if (sync.outbox().any { !it.attempted }) push(s.tenantId)
                 val issues = sync.outbox().size
@@ -221,6 +225,7 @@ class SyncEngine(
             val mutation = mutationFor(row)
             if (mutation == null) { sync.complete(row.entityType, row.entityId, row.mutationId); continue }
             if (row.entityType == EntityType.NOTE.wire) uploadAssets(tenantId, mutation)
+            if (row.entityType == EntityType.TASK.wire) uploadTaskFiles(tenantId, mutation)
             val size = mutation.toString().toByteArray().size
             // Requests stay below the server's 8 MiB limit: rich notes can be large.
             if (batch.isNotEmpty() && (batch.size >= 100 || batchBytes + size > MAX_PUSH_BYTES)) { send(tenantId, batch); batch.clear(); batchBytes = 0 }
@@ -247,6 +252,50 @@ class SyncEngine(
             api.putBytes("/v1/note-assets/$sha", bytes, asset.mimeType, tenantId)
             db.noteAssets().markUploaded(sha)
         }
+    }
+
+    /**
+     * Files attached to a task go up before the task that lists them, so another device that sees the attachment can
+     * fetch it. Content-addressed: a file already in the cloud is not resent, and an interrupted upload is sent again
+     * whole. A file the server refuses for good (too large, no room) is marked failed and the task still syncs; the
+     * user sees why on the task. Bytes are never put into the task JSON.
+     */
+    private suspend fun uploadTaskFiles(tenantId: String, mutation: JsonObject) {
+        val store = taskFiles ?: return
+        val task = (mutation["resource"] ?: mutation["changes"]) as? JsonObject ?: return
+        val attachments = (task["attachments"] as? JsonArray) ?: return
+        for (a in com.alondra1.app.domain.TaskAttachments.parse(attachments.toString())) {
+            val sha = a.sha256 ?: continue
+            val file = db.taskFiles().get(sha) ?: continue
+            if (file.uploaded || !store.hasFile(sha)) continue
+            try {
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { store.fileOf(sha).readBytes() }
+                api.putBytes("/v1/task-files/$sha", bytes, "application/octet-stream", tenantId)
+                db.taskFiles().markUploaded(sha)
+            } catch (e: ApiException) {
+                if (e.isNetwork || e.status == 401 || e.status == 403 || e.status >= 500 || e.status == 429) throw e
+                db.taskFiles().markFailed(sha, e.message ?: "The file could not be uploaded.")
+            }
+        }
+    }
+
+    /** The server's attachment limits, so the app refuses a file before the user waits for a transfer. */
+    private suspend fun refreshTaskFileLimits(tenantId: String) {
+        val limits = runCatching { api.call("GET", "/v1/task-files/limits", null, tenantId) }.getOrNull() ?: return
+        limits["max_file_bytes"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 }?.let { com.alondra1.app.data.repository.TaskFiles.limitBytes = it }
+        limits["max_per_task"]?.jsonPrimitive?.intOrNull?.takeIf { it > 0 }?.let { com.alondra1.app.data.repository.TaskFiles.limitPerTask = it }
+    }
+
+    /**
+     * Downloads an attachment added on another device, on demand (opening it). True when the bytes are now here;
+     * false when the cloud does not have them (not uploaded yet, or Cloud Sync is off for this space).
+     */
+    suspend fun downloadTaskFile(sha: String, mediaType: String?): Boolean {
+        val store = taskFiles ?: return false
+        val s = session.state.value
+        val tenant = s.tenantId?.takeIf { s.signedIn && s.syncEnabled && api.configured } ?: return false
+        val bytes = api.getBytes("/v1/task-files/$sha", tenant) ?: return false
+        return store.addDownloaded(sha, bytes, mediaType)
     }
 
     /** Pictures of notes from other devices (a batch per run; the rest next time). */

@@ -191,8 +191,11 @@ class DialogFlowsTest {
         val now = java.time.Instant.now()
         val event = runBlocking { container.calendar.save(EventEntity(id = "", title = "Planning", description = "Room 4", allDay = true,
             startDate = java.time.LocalDate.now(), endDate = java.time.LocalDate.now(), timeZoneId = "UTC", createdUtc = now, modifiedUtc = now)) }
-        rule.waitUntilAtLeastOneExists(hasTestTag("tab:Calendar"), 10_000)
-        rule.onNodeWithTag("tab:Calendar").performClick()
+        // The calendar lives inside Planned.
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab:Planned"), 10_000)
+        rule.onNodeWithTag("tab:Planned").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("plannedCalendar"), 10_000)
+        rule.onNodeWithTag("plannedCalendar").performClick()
         rule.waitUntilAtLeastOneExists(hasText("Planning"), 10_000)
         rule.onAllNodes(hasText("Planning"))[0].performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("meetingNotes"), 10_000)

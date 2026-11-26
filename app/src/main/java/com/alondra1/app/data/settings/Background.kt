@@ -14,7 +14,8 @@ enum class BackgroundPosition(val label: String) { CENTER("Center"), TOP("Top"),
 data class BackgroundSettings(
     val enabled: Boolean = true,
     /** A built-in id from [BackgroundCatalog], [BackgroundCatalog.CUSTOM] or [BackgroundCatalog.NONE]. */
-    val image: String = BackgroundCatalog.DEFAULT,
+    /** No picture unless the user picks one: primary screens use the plain app background (Android UI spec §3.3). */
+    val image: String = BackgroundCatalog.NONE,
     /** The app-managed copy of the user's picture (files/backgrounds). */
     val customPath: String? = null,
     val opacity: Float = DEFAULT_OPACITY,

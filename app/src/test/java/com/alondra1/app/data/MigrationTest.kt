@@ -97,4 +97,25 @@ class MigrationTest {
         assertEquals(0, db.completions().forTask("t1").size)
         db.close()
     }
+
+    @Test fun version5To6MovesSyncedAttachmentsIntoTheirColumn() = runBlocking<Unit> {
+        val name = "migration-5-6.db"
+        val remote = """{"id":"t1","listId":"l1","title":"Budget","attachments":[{"id":"w1","fileName":"plan.xlsx","relativePath":"t1/abc.xlsx","size":5,"addedUtc":"2026-11-20T10:00:00+00:00"}]}"""
+        helper.createDatabase(name, 5).apply {
+            execSQL("INSERT INTO task_lists (id, name, color, position, isDefault, createdUtc, modifiedUtc, deletedUtc, remoteJson, serverVersion, groupId) VALUES ('l1', 'Tasks', NULL, 0, 1, 1, 1, NULL, NULL, 3, NULL)")
+            execSQL("INSERT INTO tasks (id, listId, title, notes, completed, important, position, createdUtc, modifiedUtc, completedUtc, dueDate, dueTime, myDayDate, reminderAt, sourceNoteId, deletedUtc, remoteJson, serverVersion, startDate, recurrenceJson, stepsJson, remindersJson) " +
+                "VALUES ('t1', 'l1', 'Budget', '', 0, 0, 1, 1, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 4, NULL, NULL, '[]', '[]')", arrayOf<Any>(remote))
+            execSQL("INSERT INTO tasks (id, listId, title, notes, completed, important, position, createdUtc, modifiedUtc, completedUtc, dueDate, dueTime, myDayDate, reminderAt, sourceNoteId, deletedUtc, remoteJson, serverVersion, startDate, recurrenceJson, stepsJson, remindersJson) " +
+                "VALUES ('t2', 'l1', 'Plain', '', 0, 0, 2, 1, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', '[]')")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 6, true, *AppDatabase.MIGRATIONS)
+        val db = Room.databaseBuilder(TestSupport.context(), AppDatabase::class.java, name).addMigrations(*AppDatabase.MIGRATIONS).allowMainThreadQueries().build()
+        val attachments = com.alondra1.app.domain.TaskAttachments.parse(db.tasks().get("t1")!!.attachmentsJson)
+        assertEquals(listOf("plan.xlsx"), attachments.map { it.fileName })
+        assertEquals("t1/abc.xlsx", attachments.single().relativePath)
+        assertEquals("[]", db.tasks().get("t2")!!.attachmentsJson)
+        assertEquals(0, db.taskFiles().all().size)
+        db.close()
+    }
 }

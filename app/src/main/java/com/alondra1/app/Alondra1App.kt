@@ -15,6 +15,10 @@ open class Alondra1App : Application() {
         // Resume background sync after an app update or reboot, only if the user turned it on.
         container.cloud?.let { if (it.session.state.value.syncEnabled) it.onSyncConfigured(true) }
         // Notes in Trash longer than 30 days are deleted for good (Notes spec §7).
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { container.notes.purgeTrash() } }
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { container.notes.purgeTrash() }
+            // Task files no task lists any more (removed attachments after their Undo window).
+            runCatching { container.taskFiles.removeUnreferenced() }
+        }
     }
 }

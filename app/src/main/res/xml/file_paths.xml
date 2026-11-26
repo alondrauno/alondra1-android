@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the outgoing copies of task attachments (named for the user) are shareable, never the store itself. -->
+<paths>
+    <cache-path name="outgoing" path="outgoing/" />
+</paths>

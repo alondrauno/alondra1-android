@@ -177,13 +177,25 @@ fun CalendarScreen(
     onOpenTask: (String) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    /** Inside Planned: the screen header is Planned's, so only the month controls are shown here. */
+    embedded: Boolean = false,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var addingTask by remember { mutableStateOf(false) }
     val wide = LocalConfiguration.current.screenWidthDp >= 840
 
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(
+        if (embedded) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp)) {
+            Text(Format.monthTitle(state.month.year, state.month.month), style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f).testTag("monthTitle"))
+            IconButton(onClick = { viewModel.shiftMonth(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous month") }
+            TextButton(onClick = { viewModel.goToday() }) { Text("Today") }
+            IconButton(onClick = { viewModel.shiftMonth(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next month") }
+            IconButton(onClick = { viewModel.setMode(if (state.mode == CalendarMode.MONTH) CalendarMode.AGENDA else CalendarMode.MONTH) }) {
+                Icon(if (state.mode == CalendarMode.MONTH) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.CalendarViewMonth,
+                    contentDescription = if (state.mode == CalendarMode.MONTH) "Agenda view" else "Month view")
+            }
+        } else TopAppBar(
             title = { Text(Format.monthTitle(state.month.year, state.month.month), modifier = Modifier.testTag("monthTitle")) },
             actions = {
                 IconButton(onClick = { viewModel.shiftMonth(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous month") }

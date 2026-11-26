@@ -51,6 +51,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Opens and shares task attachments with a temporary read grant; app-private paths are never exposed. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Reminders keep wall-clock times: re-plan them when the zone or clock changes. -->
         <receiver
             android:name=".data.notifications.TimeChangeReceiver"
