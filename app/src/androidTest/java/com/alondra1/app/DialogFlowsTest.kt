@@ -257,6 +257,9 @@ class DialogFlowsTest {
             container.todo.addTask("Pack", view = com.alondra1.app.domain.SmartView.MY_DAY)
         }
         fun openTask(title: String) {
+            // Tests share one app process: the start tab is whatever the previous test left open.
+            rule.waitUntilAtLeastOneExists(hasTestTag("tab:My Day"), 10_000)
+            rule.onNodeWithTag("tab:My Day").performClick()
             rule.waitUntilAtLeastOneExists(hasTestTag("task:$title"), 10_000)
             rule.onNodeWithTag("task:$title").performClick()
             rule.waitUntilAtLeastOneExists(hasTestTag("addTag"), 10_000)
