@@ -245,6 +245,16 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0),
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            val (allTags, tagLinks) = com.alondra1.app.features.tags.rememberTags()
+            var tagFilter by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+            val noteTags = remember(allTags, tagLinks) {
+                val names = allTags.associate { it.id to it.name }
+                tagLinks.filter { it.objectType == com.alondra1.app.domain.TagRules.NOTE && it.tagId in names }.groupBy({ it.objectRef }, { names.getValue(it.tagId) })
+            }
+            val tagged = tagFilter?.takeIf { id -> allTags.any { it.id == id } }?.let { id ->
+                tagLinks.filter { it.tagId == id && it.objectType == com.alondra1.app.domain.TagRules.NOTE }.map { it.objectRef }.toSet()
+            }
+            val shownNotes = if (tagged == null) state.notes else state.notes.filter { it.id in tagged }
             TextField(
                 value = state.query,
                 onValueChange = viewModel::search,
@@ -256,6 +266,19 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
                 colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("noteSearch"),
             )
+            if (allTags.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilterChip(selected = tagged == null, onClick = { tagFilter = null }, label = { Text("All tags") })
+                    allTags.forEach { tag ->
+                        androidx.compose.material3.FilterChip(selected = tagFilter == tag.id, onClick = { tagFilter = if (tagFilter == tag.id) null else tag.id },
+                            label = { Text("#${tag.name}") }, modifier = Modifier.testTag("noteTagFilter:${tag.name}"))
+                    }
+                }
+            }
+            if (tagged != null && shownNotes.isEmpty() && state.notes.isNotEmpty()) {
+                EmptyState(Icons.Filled.Search, "No notes with this tag", "Choose All tags to see every note here.")
+                return@Column
+            }
             if (!state.loading && state.notes.isEmpty()) {
                 when {
                     state.query.isNotBlank() -> EmptyState(Icons.Filled.Search, "No matching notes", "Try another word.")
@@ -267,7 +290,7 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
                 return@Column
             }
             LazyColumn(contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.notes, key = { it.id }) { note ->
+                items(shownNotes, key = { it.id }) { note ->
                     val title = NoteRules.displayTitle(note.title, note.preview)
                     Box {
                         Surface(
@@ -286,7 +309,8 @@ fun NotesScreen(viewModel: NotesViewModel, onOpen: (String) -> Unit, onSearch: (
                                     }
                                     val preview = previewText(note)
                                     if (preview.isNotEmpty()) Text(preview, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(note.modifiedUtc.atZone(viewModel.zone()).format(fmt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(note.modifiedUtc.atZone(viewModel.zone()).format(fmt) + noteTags[note.id].orEmpty().sorted().joinToString("") { "  #$it" },
+                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Thumbnail(viewModel.thumbnail(NotesRepository.decodeIds(note.assetsJson).firstOrNull()))
                                 IconButton(onClick = { menuFor = note.id }) { Icon(Icons.Filled.MoreVert, contentDescription = "Note options") }
@@ -675,6 +699,9 @@ private fun RichEditorScreen(viewModel: NoteEditorViewModel, onClose: () -> Unit
                         trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove link", Modifier.size(16.dp).clickable { scope.launch { viewModel.removeLink(link) } }) })
                 }
             }
+        }
+        if (viewModel.note != null && !trashed) {
+            com.alondra1.app.features.tags.TagSection(com.alondra1.app.domain.TagRules.NOTE, viewModel.noteId, Modifier.padding(horizontal = 12.dp), scroll = true)
         }
         AndroidView(factory = { bridge.webView }, modifier = Modifier.fillMaxWidth().weight(1f).testTag("richEditor"))
     }

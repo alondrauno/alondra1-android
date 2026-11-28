@@ -132,6 +132,9 @@ object Routes {
     const val SEARCH = "search"
     const val SETTINGS = "settings"
     const val BACKGROUND = "settings/background"
+    const val TAGS = "settings/tags"
+    const val TAGGED = "tag/{id}"
+    fun tagged(id: String) = "tag/$id"
     const val NOTE_CONFLICT = "note-conflict/{issue}"
     fun noteConflict(issueId: Long) = "note-conflict/$issueId"
     fun task(id: String) = "task/$id"
@@ -391,7 +394,15 @@ private fun AppNavHost(nav: NavHostController, container: AppContainer, start: S
                 onNote = { nav.navigate(Routes.note(it)) }, onEvent = { nav.navigate(Routes.event(it)) })
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { nav.popBackStack() }, accountSection = accountSection, onBackground = { nav.navigate(Routes.BACKGROUND) })
+            SettingsScreen(onBack = { nav.popBackStack() }, accountSection = accountSection, onBackground = { nav.navigate(Routes.BACKGROUND) },
+                onTags = { nav.navigate(Routes.TAGS) })
+        }
+        composable(Routes.TAGS) {
+            com.alondra1.app.features.tags.TagsScreen(onBack = { nav.popBackStack() }, onShowItems = { nav.navigate(Routes.tagged(it)) })
+        }
+        composable(Routes.TAGGED, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+            com.alondra1.app.features.tags.TaggedItemsScreen(entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() },
+                onTask = { nav.navigate(Routes.task(it)) }, onNote = { nav.navigate(Routes.note(it)) }, onEvent = { nav.navigate(Routes.event(it)) })
         }
         composable(Routes.BACKGROUND) {
             com.alondra1.app.features.settings.BackgroundScreen(onBack = { nav.popBackStack() })

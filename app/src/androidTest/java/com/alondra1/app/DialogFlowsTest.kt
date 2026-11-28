@@ -8,6 +8,9 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -245,5 +248,39 @@ class DialogFlowsTest {
         rule.waitUntilAtLeastOneExists(hasTestTag("confirmDeleteNote"), 10_000)
         rule.onNodeWithTag("confirmDeleteNote").performClick()
         rule.waitUntil(10_000) { runBlocking { container.notes.getNote("n4")!!.deletedUtc } != null }
+    }
+
+    /** FEATURES_EXTENSION Part B §2: create a tag from the picker on a task, pick it again on a second task, remove it. */
+    @Test fun tagPickerCreatesPicksAndRemovesTags() {
+        runBlocking {
+            container.todo.addTask("Book the ferry", view = com.alondra1.app.domain.SmartView.MY_DAY)
+            container.todo.addTask("Pack", view = com.alondra1.app.domain.SmartView.MY_DAY)
+        }
+        fun openTask(title: String) {
+            rule.waitUntilAtLeastOneExists(hasTestTag("task:$title"), 10_000)
+            rule.onNodeWithTag("task:$title").performClick()
+            rule.waitUntilAtLeastOneExists(hasTestTag("addTag"), 10_000)
+            rule.onNodeWithTag("addTag").performScrollTo().performClick()
+            rule.waitUntilAtLeastOneExists(hasTestTag("tagQuery"), 10_000)
+        }
+        openTask("Book the ferry")
+        rule.onNodeWithTag("tagQuery").performTextInput("Travel")
+        rule.waitUntilAtLeastOneExists(hasTestTag("createTag"), 10_000)
+        rule.onNodeWithTag("createTag").performClick()
+        rule.onNodeWithText("Done").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("tag:Travel"), 10_000)
+        rule.onNodeWithContentDescription("Back").performClick()
+
+        openTask("Pack")
+        rule.onNodeWithTag("tagQuery").performTextInput("trav")
+        rule.waitUntilAtLeastOneExists(hasTestTag("pick:Travel"), 10_000)
+        rule.onNodeWithTag("pick:Travel").performClick()
+        rule.onNodeWithText("Done").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("tag:Travel"), 10_000)
+        assertEquals(1, runBlocking { container.tags.tags().size })
+        assertEquals(2, runBlocking { container.tags.links().size })
+
+        rule.onNodeWithContentDescription("Remove tag Travel").performClick()
+        rule.waitUntil(10_000) { runBlocking { container.tags.links().size } == 1 }
     }
 }

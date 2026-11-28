@@ -18,6 +18,7 @@ A complete, structured list of what the Android app does: high-level **capabilit
 | 2 | [To-do](#2-to-do-todo) | Tasks, lists, smart views, quick add, reminders, undo | `features/todo`, `data/repository/TodoRepository.kt`, `domain/TaskRules.kt` |
 | 3 | [Notes](#3-notes-note) | Organization, rich editor, pictures, saving, search, links, sharing, sync conflicts | `features/notes`, `data/repository/NotesRepository.kt`, `NoteAssets.kt`, `domain/NoteMerge.kt` |
 | 4 | [Calendar](#4-calendar-cal) | Month and agenda views, events, task dates, meeting notes | `features/calendar`, `data/repository/CalendarRepository.kt`, `domain/EventRules.kt` |
+| 4b | [Tags](#4b-tags-tag) | One tag across tasks, notes and events; picker, filters, Settings → Tags, sync | `features/tags`, `data/repository/TagRepository.kt`, `domain/TagRules.kt` |
 | 5 | [Reminders and notifications](#5-reminders-and-notifications-rem) | Channels, scheduling, permission, privacy | `data/notifications` |
 | 6 | [Alondra1 account and cloud](#6-alondra1-account-and-cloud-cloud) | Sign-in, plan, devices | `auth/` |
 | 7 | [Cloud Sync](#7-cloud-sync-sync) | Enable and merge, outbox, push and pull, conflicts, pictures, worker | `data/sync/` |
@@ -152,6 +153,19 @@ Code: `features/calendar/CalendarScreens.kt` (`CalendarScreen`, `EventEditorScre
 | CAL-MEET-01 | **Meeting notes** on a saved event: opens the linked note or creates one from the meeting template | Done | Template shared with Windows. |
 | CAL-SYS-01 | System calendar access | Gap | By design; no calendar permission. |
 | CAL-REP-01 | Repeating events | Gap | |
+
+### 4b. Tags (`TAG`)
+
+FEATURES_EXTENSION Part B §2. Code: `domain/TagRules.kt`, `data/local/TagEntities.kt` (schema 7), `data/repository/TagRepository.kt`, `features/tags/Tags.kt`; sync kinds `tag` and `tag_link` in `data/sync/SyncEngine.kt`. Tests: `TagsTest`, `SyncEngineTest`, `MigrationTest`, `AppFlowsTest`, `DialogFlowsTest`. Contract: alondra1-backend `contract/schemas/tags-v1`, `tag-links-v1`. IDs match the Windows map.
+
+| ID | Atomic feature | Status | Notes |
+| --- | --- | --- | --- |
+| TAG-01 | One tag across tasks, notes and events; unique names ignoring case; at most 500 tags and 50 per item | Done | Link ids and name keys identical to the cloud, Windows and Web (shared test vectors). |
+| TAG-02 | Picker: find, check or uncheck, create from what was typed; chips with remove on the task, the note and a saved event | Done | Unassigning keeps the link as removed, so it comes back with the same id. |
+| TAG-03 | `#tag` on task cards and note rows; tag filter chips in task lists and Notes | Done | |
+| TAG-04 | Settings → Tags: add, rename, color, delete with usage in words; deleting keeps the items | Done | Color is a hint; the name is always shown. |
+| TAG-05 | Show items: everything with a tag across To-do, Notes and Calendar; Windows mail with the tag is counted | Done | Mail stays on the Windows PC. |
+| TAG-06 | Sync: tags after the items they label, links last; a duplicate name made offline merges into the cloud's tag without a sync issue | Done | Deleting a tag sends only the tag (the cloud deletes its links). |
 
 ## 5. Reminders and notifications (`REM`)
 

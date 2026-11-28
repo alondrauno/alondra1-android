@@ -193,7 +193,7 @@ class RepositoriesTest {
      * change without a new schema version and migration fails here.
      */
     @Test fun committedSchemaMatchesTheEntities() = runBlocking<Unit> {
-        val version = 6
+        val version = 7
         val json = File("schemas/com.alondra1.app.data.local.AppDatabase/$version.json").readText()
         val expected = Regex(""""identityHash"\s*:\s*"([0-9a-f]+)"""").find(json)!!.groupValues[1]
         val db = TestSupport.memoryDb()

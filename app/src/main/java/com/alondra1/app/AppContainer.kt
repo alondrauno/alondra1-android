@@ -46,6 +46,7 @@ class AppContainer(
     val notes = NotesRepository(db, time, changes)
     val noteAssets = com.alondra1.app.data.repository.NoteAssets(db, assetsDir, time)
     val calendar = CalendarRepository(db, time, reminders, changes)
+    val tags = com.alondra1.app.data.repository.TagRepository(db, time, changes)
     val search = SearchRepository(db)
     val backgrounds = com.alondra1.app.data.settings.BackgroundStore(backgroundsDir)
     val taskFiles = com.alondra1.app.data.repository.TaskFiles(db, taskFilesDir, time)
@@ -63,6 +64,8 @@ class AppContainer(
             db.maintenance().clearLists()
             db.maintenance().clearNotes()
             db.maintenance().clearEvents()
+            db.tags().clearLinks()
+            db.tags().clearTags()
         }
         settings.clear()
         backgrounds.deleteAll()

@@ -46,6 +46,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -172,6 +174,16 @@ fun TodoScreen(
             }
         }
 
+        if (state.tags.isNotEmpty()) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = com.alondra1.app.design.Space.screen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = state.tagFilter == null, onClick = { viewModel.setTagFilter(null) }, label = { Text("All tags") })
+                state.tags.forEach { tag ->
+                    FilterChip(selected = state.tagFilter == tag.id, onClick = { viewModel.setTagFilter(if (state.tagFilter == tag.id) null else tag.id) },
+                        label = { Text("#${tag.name}") }, modifier = Modifier.testTag("tagFilter:${tag.name}"))
+                }
+            }
+        }
+
         Box(Modifier.weight(1f)) {
             val toggle: (TaskEntity) -> Unit = { task ->
                 scope.launch {
@@ -207,6 +219,7 @@ fun TodoScreen(
                                 onOpen = { onOpenTask(task.id) },
                                 onToggleComplete = { toggle(task) },
                                 onToggleImportant = { viewModel.setImportant(task, !task.important) },
+                                tags = state.taskTags[task.id].orEmpty(),
                             )
                         }
                     }
@@ -308,6 +321,7 @@ fun TaskRow(
     selected: Boolean = false,
     inMyDay: Boolean = false,
     dayInGroup: Boolean = false,
+    tags: List<String> = emptyList(),
 ) {
     val is24 = is24Hour()
     val steps = remember(task.stepsJson) { com.alondra1.app.domain.TaskJson.steps(task.stepsJson) }
@@ -315,6 +329,7 @@ fun TaskRow(
         parts = buildList {
             if (task.myDayDate == today && !task.completed && !inMyDay) add("My Day")
             if (showList && listName != null) add(listName)
+            tags.forEach { add("#$it") }
         },
         due = task.dueDate?.let { d ->
             if (dayInGroup) task.dueTime?.let { t -> Format.time(t, is24) }

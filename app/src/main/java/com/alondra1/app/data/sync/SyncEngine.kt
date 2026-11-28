@@ -139,6 +139,8 @@ class SyncEngine(
             db.noteFolders().active().filter { it.serverVersion == null && it.id !in remoteIds["note_folder"].orEmpty() }.forEach { enqueue(EntityType.NOTE_FOLDER, it.id) }
             db.notes().all().filter { it.serverVersion == null && it.id !in remoteIds["note"].orEmpty() }.forEach { enqueue(EntityType.NOTE, it.id) }
             db.events().all().filter { it.serverVersion == null && it.id !in remoteIds["event"].orEmpty() }.forEach { enqueue(EntityType.EVENT, it.id) }
+            db.tags().active().filter { it.serverVersion == null && it.id !in remoteIds["tag"].orEmpty() }.forEach { enqueue(EntityType.TAG, it.id) }
+            db.tags().assigned().filter { it.serverVersion == null && it.id !in remoteIds["tag_link"].orEmpty() }.forEach { enqueue(EntityType.TAG_LINK, it.id) }
             session.setCursor(cursor)
         }
     }
@@ -180,6 +182,7 @@ class SyncEngine(
                 set(SyncState.SYNCING)
                 push(s.tenantId)
                 pull(s.tenantId)
+                mergeDuplicateTags()
                 downloadAssets(s.tenantId)
                 refreshTaskFileLimits(s.tenantId)
                 // Conflict copies are created while pushing: send them in this same run, not at the next sync.
@@ -212,7 +215,11 @@ class SyncEngine(
         return _status.value
     }
 
-    private val typeOrder = listOf(EntityType.LIST_GROUP.wire, EntityType.TASK_LIST.wire, EntityType.TASK.wire, EntityType.NOTE_FOLDER.wire, EntityType.NOTE.wire, EntityType.EVENT.wire)
+    /** Parents first; tags after everything they can label, links last. */
+    private val typeOrder = listOf(EntityType.LIST_GROUP.wire, EntityType.TASK_LIST.wire, EntityType.TASK.wire, EntityType.NOTE_FOLDER.wire, EntityType.NOTE.wire, EntityType.EVENT.wire,
+        EntityType.TAG.wire, EntityType.TAG_LINK.wire)
+
+    private fun isTag(type: String) = type == EntityType.TAG.wire || type == EntityType.TAG_LINK.wire
 
     /** mutation id -> completion record sent with it (append_completion), marked sent when the mutation is applied. */
     private val sentCompletions = mutableMapOf<String, String>()
@@ -328,6 +335,8 @@ class SyncEngine(
             EntityType.NOTE.wire -> db.notes().get(row.entityId)?.let { Quad(WireMapper.note(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
             EntityType.NOTE_FOLDER.wire -> db.noteFolders().get(row.entityId)?.let { Quad(WireMapper.folder(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
             EntityType.EVENT.wire -> db.events().get(row.entityId)?.let { Quad(WireMapper.event(it), null, it.serverVersion, it.deletedUtc != null) }
+            EntityType.TAG.wire -> db.tags().get(row.entityId)?.let { Quad(WireMapper.tag(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
+            EntityType.TAG_LINK.wire -> db.tags().link(row.entityId)?.let { Quad(WireMapper.tagLink(it), it.remoteJson, it.serverVersion, it.deletedUtc != null) }
             else -> null
         } ?: return null
         return buildJsonObject {
@@ -376,6 +385,9 @@ class SyncEngine(
                 sync.complete(row.entityType, row.entityId, row.mutationId)
             }
             else -> {
+                // Tags: a second tag with a name the cloud already has (merged into the cloud's tag after the pull), or a
+                // link to a tag or item that is gone. Nothing for the user to do, so no sync issue.
+                if (isTag(row.entityType)) { sync.complete(row.entityType, row.entityId, row.mutationId); return }
                 val message = result["message"]?.jsonPrimitive?.contentOrNull ?: "The cloud did not accept this change."
                 sync.addIssue(SyncIssueEntity(entityType = row.entityType, entityId = row.entityId, title = titleOf(row.entityType, row.entityId),
                     message = "Not synced: $message It is still on this device.", createdUtc = time.now().toEpochMilli()))
@@ -391,6 +403,7 @@ class SyncEngine(
         EntityType.NOTE.wire -> db.notes().get(id)?.let { com.alondra1.app.domain.NoteRules.displayTitle(it) }
         EntityType.NOTE_FOLDER.wire -> db.noteFolders().get(id)?.name
         EntityType.EVENT.wire -> db.events().get(id)?.title
+        EntityType.TAG.wire -> db.tags().get(id)?.name
         else -> null
     } ?: "Item"
 
@@ -440,6 +453,7 @@ class SyncEngine(
                 enqueue(EntityType.EVENT, copyId)
             }
             EntityType.TASK_LIST.wire, EntityType.NOTE_FOLDER.wire -> Unit // containers: the server version wins below; contents keep their ids
+            EntityType.TAG.wire, EntityType.TAG_LINK.wire -> report = false // the cloud's state is shown, without an issue
         }
         if (current != null && !currentDeleted) applyRecord(row.entityType, current, force = true)
         if (currentDeleted) tombstone(row.entityType, row.entityId)
@@ -527,6 +541,8 @@ class SyncEngine(
             EntityType.NOTE.wire -> db.notes().get(id)?.let { db.notes().put(it.copy(serverVersion = version, remoteJson = (record["note"] as? JsonObject)?.toString())) }
             EntityType.NOTE_FOLDER.wire -> db.noteFolders().get(id)?.let { db.noteFolders().put(it.copy(serverVersion = version, remoteJson = (record["note_folder"] as? JsonObject)?.toString())) }
             EntityType.EVENT.wire -> db.events().get(id)?.let { db.events().put(it.copy(serverVersion = version)) }
+            EntityType.TAG.wire -> db.tags().get(id)?.let { db.tags().put(it.copy(serverVersion = version, remoteJson = (record["tag"] as? JsonObject)?.toString())) }
+            EntityType.TAG_LINK.wire -> db.tags().link(id)?.let { db.tags().putLink(it.copy(serverVersion = version, remoteJson = (record["tag_link"] as? JsonObject)?.toString())) }
         }
     }
 
@@ -570,6 +586,16 @@ class SyncEngine(
                 db.events().put(event)
                 reminders.syncEvent(event)
             }
+            EntityType.TAG.wire -> (record["tag"] as? JsonObject)?.let { o ->
+                val local = db.tags().get(o["id"]!!.jsonPrimitive.content)
+                if (!force && local?.serverVersion != null && local.serverVersion >= version) return
+                db.tags().put(WireMapper.tagFrom(o, version))
+            }
+            EntityType.TAG_LINK.wire -> (record["tag_link"] as? JsonObject)?.let { o ->
+                val local = db.tags().link(o["id"]!!.jsonPrimitive.content)
+                if (!force && local?.serverVersion != null && local.serverVersion >= version) return
+                db.tags().putLink(WireMapper.tagLinkFrom(o, version))
+            }
         }
     }
 
@@ -592,6 +618,35 @@ class SyncEngine(
             EntityType.NOTE.wire -> db.notes().get(id)?.let { db.notes().put(it.copy(deletedUtc = now)) }
             EntityType.NOTE_FOLDER.wire -> db.noteFolders().get(id)?.let { db.noteFolders().put(it.copy(deletedUtc = now)) } // its notes show in All notes
             EntityType.EVENT.wire -> db.events().get(id)?.let { db.events().put(it.copy(deletedUtc = now)); reminders.cancelEvent(id) }
+            EntityType.TAG.wire -> db.tags().get(id)?.let { db.tags().put(it.copy(deletedUtc = now)) } // its links arrive as deletes too
+            EntityType.TAG_LINK.wire -> db.tags().link(id)?.let { db.tags().putLink(it.copy(deletedUtc = now)) }
+        }
+    }
+
+    /**
+     * Two live tags with the same name (made on two devices offline): the one the cloud has keeps its id; a tag that
+     * never reached the cloud (the cloud refused the name) hands its items over and disappears locally.
+     */
+    private suspend fun mergeDuplicateTags() = db.withTransaction {
+        val now = time.now()
+        for (group in db.tags().active().groupBy { it.nameKey }.values.filter { it.size > 1 }) {
+            val sorted = group.sortedWith(compareBy({ it.serverVersion == null }, { it.createdUtc }))
+            val keeper = sorted.first()
+            for (other in sorted.drop(1).filter { it.serverVersion == null }) {
+                for (link in db.tags().linksOf(other.id)) {
+                    if (!link.removed && db.tags().countOn(link.objectType, link.objectRef) <= com.alondra1.app.domain.TagRules.MAX_PER_ITEM) {
+                        val id = com.alondra1.app.domain.TagRules.linkId(keeper.id, link.objectType, link.objectRef)
+                        val existing = db.tags().link(id)?.takeIf { it.deletedUtc == null }
+                        if (existing == null || existing.removed) {
+                            db.tags().putLink(existing?.copy(removed = false, modifiedUtc = now)
+                                ?: link.copy(id = id, tagId = keeper.id, removed = false, createdUtc = now, modifiedUtc = now, serverVersion = null, remoteJson = null))
+                            enqueue(EntityType.TAG_LINK, id)
+                        }
+                    }
+                    db.tags().putLink(link.copy(deletedUtc = now))
+                }
+                db.tags().put(other.copy(deletedUtc = now))
+            }
         }
     }
 

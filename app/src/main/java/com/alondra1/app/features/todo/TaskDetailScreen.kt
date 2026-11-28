@@ -396,6 +396,8 @@ private fun TaskDetailBody(viewModel: TaskDetailViewModel, task: TaskEntity, lis
         // Files attached to the task (metadata syncs with the task; the bytes separately).
         AttachmentsSection(task.id, task.attachmentsJson, Modifier.padding(top = 4.dp))
 
+        com.alondra1.app.features.tags.TagSection(com.alondra1.app.domain.TagRules.TASK, task.id, Modifier.padding(top = 4.dp).testTag("taskTags"))
+
         val fmt = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
         Text(
             "Created " + task.createdUtc.atZone(viewModel.zone()).format(fmt) + "\nUpdated " + task.modifiedUtc.atZone(viewModel.zone()).format(fmt),

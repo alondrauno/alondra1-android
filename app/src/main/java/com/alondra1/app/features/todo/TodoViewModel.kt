@@ -43,6 +43,10 @@ data class TodoUiState(
     val sort: TaskSort = TaskSort.DUE_DATE,
     val status: StatusFilter = StatusFilter.OPEN,
     val now: ZonedDateTime = ZonedDateTime.now(),
+    /** All tags (for the filter), the tag names per task id, and the tag filter (null: all). */
+    val tags: List<com.alondra1.app.data.local.TagEntity> = emptyList(),
+    val taskTags: Map<String, List<String>> = emptyMap(),
+    val tagFilter: String? = null,
 ) {
     val today: LocalDate get() = now.toLocalDate()
     val listNames: Map<String, String> get() = lists.associate { it.id to it.name }
@@ -53,6 +57,7 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
     private val todo = container.todo
     private val selection = MutableStateFlow(initial)
     private val status = MutableStateFlow(StatusFilter.OPEN)
+    private val tagFilter = MutableStateFlow<String?>(null)
 
     /** Re-evaluates date rules every minute (Overdue at a due time, My Day after midnight). */
     private val clock = flow {
@@ -67,12 +72,18 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
         combine(todo.observeLists(), todo.observeGroups()) { l, g -> l to g },
         container.settings.settings.map { it.taskSort },
         combine(selection, status) { s, f -> s to f },
-        clock,
-    ) { tasks, (lists, groups), sort, (sel, filter), now ->
+        combine(clock, container.tags.observeTags(), container.tags.observeLinks(), tagFilter) { now, t, l, tf -> TagView(now, t, l, tf) },
+    ) { tasks, (lists, groups), sort, (sel, filter), tagView ->
+        val now = tagView.now
+        val names = tagView.tags.associate { it.id to it.name }
+        val taskTags = tagView.links.filter { it.objectType == com.alondra1.app.domain.TagRules.TASK && it.tagId in names }
+            .groupBy({ it.objectRef }, { names.getValue(it.tagId) }).mapValues { (_, n) -> n.sorted() }
+        val filterId = tagView.filter?.takeIf { it in names }
+        val tagged = filterId?.let { id -> tagView.links.filter { it.tagId == id && it.objectType == com.alondra1.app.domain.TagRules.TASK }.map { it.objectRef }.toSet() }
         val visible = when (sel) {
             is TodoSelection.View -> TaskRules.select(sel.view, tasks, now, sort, filter)
             is TodoSelection.List -> TaskRules.sort(tasks.filter { TaskRules.inList(it, sel.id, filter) }, sort)
-        }
+        }.filter { tagged == null || it.id in tagged }
         val title = when (sel) {
             is TodoSelection.View -> sel.view.title
             is TodoSelection.List -> lists.firstOrNull { it.id == sel.id }?.name ?: "List"
@@ -89,6 +100,9 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
             sort = sort,
             status = filter,
             now = now,
+            tags = tagView.tags,
+            taskTags = taskTags,
+            tagFilter = filterId,
         )
     }
         .catch { emit(TodoUiState(loading = false, error = "Your tasks could not be loaded. Restart the app; your data is kept.")) }
@@ -104,6 +118,11 @@ class TodoViewModel(private val container: AppContainer, initial: TodoSelection)
     }
 
     fun setStatus(filter: StatusFilter) { status.value = filter }
+
+    fun setTagFilter(tagId: String?) { tagFilter.value = tagId }
+
+    private data class TagView(val now: ZonedDateTime, val tags: List<com.alondra1.app.data.local.TagEntity>,
+        val links: List<com.alondra1.app.data.local.TagLinkEntity>, val filter: String?)
 
     fun setSort(sort: TaskSort) { viewModelScope.launch { container.settings.setTaskSort(sort) } }
 

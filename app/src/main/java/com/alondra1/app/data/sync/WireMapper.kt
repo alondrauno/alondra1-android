@@ -156,6 +156,40 @@ object WireMapper {
         serverVersion = version, remoteJson = o.toString(),
     )
 
+    fun tag(t: com.alondra1.app.data.local.TagEntity): JsonObject {
+        val m = base(t.remoteJson)
+        m["id"] = JsonPrimitive(t.id); m["name"] = JsonPrimitive(t.name)
+        m["color"] = t.color?.let(::JsonPrimitive) ?: JsonNull
+        m["createdUtc"] = JsonPrimitive(utc(t.createdUtc)); m["modifiedUtc"] = JsonPrimitive(utc(t.modifiedUtc))
+        return JsonObject(m)
+    }
+
+    fun tagFrom(o: JsonObject, version: Long): com.alondra1.app.data.local.TagEntity {
+        val name = o.str("name").orEmpty().ifBlank { "Tag" }
+        return com.alondra1.app.data.local.TagEntity(
+            id = o.str("id")!!, name = name, nameKey = com.alondra1.app.domain.TagRules.nameKey(name),
+            color = o.str("color")?.takeIf { it in com.alondra1.app.domain.TagRules.COLORS },
+            createdUtc = instant(o.str("createdUtc")) ?: Instant.now(), modifiedUtc = instant(o.str("modifiedUtc")) ?: Instant.now(),
+            serverVersion = version, remoteJson = o.toString(),
+        )
+    }
+
+    fun tagLink(l: com.alondra1.app.data.local.TagLinkEntity): JsonObject {
+        val m = base(l.remoteJson)
+        m["id"] = JsonPrimitive(l.id); m["tagId"] = JsonPrimitive(l.tagId)
+        m["objectType"] = JsonPrimitive(l.objectType); m["objectRef"] = JsonPrimitive(l.objectRef)
+        m["removed"] = JsonPrimitive(l.removed)
+        m["createdUtc"] = JsonPrimitive(utc(l.createdUtc)); m["modifiedUtc"] = JsonPrimitive(utc(l.modifiedUtc))
+        return JsonObject(m)
+    }
+
+    fun tagLinkFrom(o: JsonObject, version: Long): com.alondra1.app.data.local.TagLinkEntity = com.alondra1.app.data.local.TagLinkEntity(
+        id = o.str("id")!!, tagId = o.str("tagId").orEmpty(), objectType = o.str("objectType").orEmpty(), objectRef = o.str("objectRef").orEmpty(),
+        removed = o.bool("removed"),
+        createdUtc = instant(o.str("createdUtc")) ?: Instant.now(), modifiedUtc = instant(o.str("modifiedUtc")) ?: Instant.now(),
+        serverVersion = version, remoteJson = o.toString(),
+    )
+
     fun event(e: EventEntity): JsonObject = buildJsonObject {
         put("id", e.id); put("title", e.title); put("description", e.description); put("allDay", e.allDay)
         if (e.allDay) {

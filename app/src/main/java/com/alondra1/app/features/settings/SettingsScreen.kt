@@ -56,7 +56,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, onBackground: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, onBackground: () -> Unit = {}, onTags: () -> Unit = {}) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -86,6 +86,12 @@ fun SettingsScreen(onBack: () -> Unit, accountSection: @Composable () -> Unit, o
                         Text(if (!bg.enabled) "Off" else com.alondra1.app.data.settings.BackgroundCatalog.name(bg.image))
                     },
                     modifier = Modifier.clickable(onClick = onBackground).testTag("backgroundSettings"),
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("Tags") },
+                    supportingContent = { Text("Add, rename, color and delete tags") },
+                    modifier = Modifier.clickable(onClick = onTags).testTag("tagSettings"),
                 )
                 HorizontalDivider()
                 Choice("First day of week",

@@ -240,4 +240,32 @@ class AppFlowsTest {
         val dev = com.alondra1.app.BuildConfig.ENVIRONMENT == "dev"
         assertEquals(dev, rule.onAllNodes(hasTestTag("sendFeedback")).fetchSemanticsNodes().isNotEmpty())
     }
+
+    /**
+     * FEATURES_EXTENSION Part B §2: a tagged task shows #tag on its card and its chip in the details, the tag filter
+     * narrows the list, and Settings → Tags shows the usage and everything with the tag. (Picking a tag in the dialog
+     * is an instrumented test: DialogFlowsTest.)
+     */
+    @Test fun taggedTaskShowsOnTheCardFiltersAndInSettings() {
+        runBlocking {
+            val task = container.todo.addTask("Book the ferry", view = com.alondra1.app.domain.SmartView.MY_DAY)
+            container.todo.addTask("Water the plants", view = com.alondra1.app.domain.SmartView.MY_DAY)
+            val travel = container.tags.create("Travel", "blue")
+            container.tags.setTag(com.alondra1.app.domain.TagRules.TASK, listOf(task.id), travel.id, true)
+        }
+        waitForText("#Travel")
+        waitFor("tagFilter:Travel"); rule.onNodeWithTag("tagFilter:Travel").performClick()
+        waitGone("task:Water the plants")
+        rule.onNodeWithTag("task:Book the ferry").performClick()
+        waitFor("tag:Travel")
+        rule.onNodeWithContentDescription("Back").performClick()
+
+        waitFor("tab:My Day")
+        rule.onNodeWithContentDescription("Account and settings").performClick()
+        waitFor("tagSettings"); rule.onNodeWithTag("tagSettings").performClick()
+        waitFor("tagRow:Travel")
+        waitForText("1 task · Blue")
+        rule.onNodeWithText("Show items").performClick()
+        waitFor("tagged:Book the ferry")
+    }
 }

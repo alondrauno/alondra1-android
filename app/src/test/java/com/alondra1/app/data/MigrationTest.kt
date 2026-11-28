@@ -118,4 +118,17 @@ class MigrationTest {
         assertEquals(0, db.taskFiles().all().size)
         db.close()
     }
+
+    @Test fun version6To7AddsTagTablesAndKeepsData() = runBlocking<Unit> {
+        val name = "migration-6-7.db"
+        helper.createDatabase(name, 6).apply {
+            execSQL("INSERT INTO task_lists (id, name, color, position, isDefault, createdUtc, modifiedUtc, deletedUtc, remoteJson, serverVersion, groupId) VALUES ('l1', 'Tasks', NULL, 0, 1, 1, 1, NULL, NULL, NULL, NULL)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 7, true, *AppDatabase.MIGRATIONS)
+        val db = Room.databaseBuilder(TestSupport.context(), AppDatabase::class.java, name).addMigrations(*AppDatabase.MIGRATIONS).allowMainThreadQueries().build()
+        assertEquals("Tasks", db.taskLists().get("l1")!!.name)
+        assertEquals(0, db.tags().active().size)
+        db.close()
+    }
 }

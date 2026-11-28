@@ -12,4 +12,4 @@ interface ChangeRecorder {
     }
 }
 
-enum class EntityType(val wire: String) { LIST_GROUP("group"), TASK("task"), TASK_LIST("list"), NOTE_FOLDER("note_folder"), NOTE("note"), EVENT("event") }
+enum class EntityType(val wire: String) { LIST_GROUP("group"), TASK("task"), TASK_LIST("list"), NOTE_FOLDER("note_folder"), NOTE("note"), EVENT("event"), TAG("tag"), TAG_LINK("tag_link") }

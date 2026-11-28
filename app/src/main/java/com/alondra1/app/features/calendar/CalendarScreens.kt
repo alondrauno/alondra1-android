@@ -632,6 +632,7 @@ fun EventEditorScreen(viewModel: EventEditorViewModel, onClose: () -> Unit, onMe
                     Text("Meeting notes")
                 }
             }
+            if (!viewModel.isNew) com.alondra1.app.features.tags.TagSection(com.alondra1.app.domain.TagRules.EVENT, viewModel.id)
             Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
                 Column {
                     ListItem(headlineContent = { Text("All day") }, trailingContent = { Switch(checked = viewModel.allDay, onCheckedChange = null) },

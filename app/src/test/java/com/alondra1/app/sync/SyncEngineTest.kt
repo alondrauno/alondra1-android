@@ -113,6 +113,59 @@ class SyncEngineTest {
     private fun taskRecord(id: String, version: Int, title: String, listId: String) =
         """{"resource_type":"task","action":"upsert","resource_id":"$id","record":{"id":"$id","version":$version,"schema_version":1,"updated_at":"2026-11-20T00:00:00Z","task":{"id":"$id","listId":"$listId","title":"$title","notes":"","completed":false,"important":false,"position":1,"createdUtc":"2026-11-01T00:00:00Z","modifiedUtc":"2026-11-01T00:00:00Z","myDayDate":"2026-11-23"}}}"""
 
+    private fun tagRecord(id: String, version: Int, name: String) =
+        """{"resource_type":"tag","action":"upsert","resource_id":"$id","record":{"id":"$id","version":$version,"schema_version":1,"updated_at":"2026-11-20T00:00:00Z","tag":{"id":"$id","name":"$name","color":null,"createdUtc":"2026-11-01T00:00:00Z","modifiedUtc":"2026-11-01T00:00:00Z"}}}"""
+
+    @Test fun tagsGoUpAfterTheItemsTheyLabel() = runBlocking<Unit> {
+        val task = c.todo.addTask("Pack")
+        val tag = c.tags.create("Travel")
+        c.tags.setTag(com.alondra1.app.domain.TagRules.TASK, listOf(task.id), tag.id, true)
+        bootstrapItems = "[${listRecord("d", 1, true)}]"
+        engine.enable(tenant)
+        val sent = pushes.flatMap { it["mutations"]!!.jsonArray }.map { it.jsonObject }
+        val types = sent.map { it["resource_type"]!!.jsonPrimitive.content }
+        assertTrue(types.indexOf("tag") > types.indexOf("task"))
+        assertTrue(types.indexOf("tag_link") > types.indexOf("tag"))
+        val link = sent.single { it["resource_type"]!!.jsonPrimitive.content == "tag_link" }["resource"]!!.jsonObject
+        assertEquals(com.alondra1.app.domain.TagRules.linkId(tag.id, "task", task.id), link["id"]!!.jsonPrimitive.content)
+        assertEquals(0, c.db.sync().outbox().size)
+    }
+
+    @Test fun aTagNameTheCloudHasMergesIntoTheCloudTagWithoutAnIssue() = runBlocking<Unit> {
+        val task = c.todo.addTask("Pack")
+        val mine = c.tags.create("TRAVEL")
+        c.tags.setTag(com.alondra1.app.domain.TagRules.TASK, listOf(task.id), mine.id, true)
+        bootstrapItems = "[${listRecord("d", 1, true)},${tagRecord("cloud-travel", 1, "Travel")}]"
+        pushResponder = { req ->
+            val results = req["mutations"]!!.jsonArray.map { it.jsonObject }.map { m ->
+                val id = m["mutation_id"]!!.jsonPrimitive.content
+                val type = m["resource_type"]!!.jsonPrimitive.content
+                val resource = m["resource"] as? JsonObject
+                when {
+                    type == "tag" && m["action"]!!.jsonPrimitive.content == "create" ->
+                        """{"mutation_id":"$id","status":"rejected","code":"TAG_NAME_TAKEN","message":"taken"}"""
+                    type == "tag_link" && resource?.get("tagId")?.jsonPrimitive?.content == mine.id ->
+                        """{"mutation_id":"$id","status":"rejected","code":"INVALID_REFERENCE","message":"gone"}"""
+                    else -> null
+                }
+            }
+            if (results.all { it == null }) appliedAll(req)
+            else {
+                val applied = appliedAll(req).getBody()!!.readUtf8().let { WireMapper.json.parseToJsonElement(it).jsonObject["results"]!!.jsonArray }
+                json("""{"results":[${results.mapIndexed { i, r -> r ?: applied[i].toString() }.joinToString(",")}]}""")
+            }
+        }
+        engine.enable(tenant)
+        val tags = c.tags.tags()
+        assertEquals(listOf("cloud-travel"), tags.map { it.id })
+        assertEquals(listOf("cloud-travel"), c.tags.links().map { it.tagId })
+        assertEquals(0, c.db.sync().observeIssuesOnce().size)
+        val sent = pushes.flatMap { it["mutations"]!!.jsonArray }.map { it.jsonObject }
+        assertTrue("the task's tag reached the cloud under the cloud's tag", sent.any {
+            it["resource_type"]!!.jsonPrimitive.content == "tag_link" && (it["resource"] as? JsonObject)?.get("tagId")?.jsonPrimitive?.content == "cloud-travel"
+        })
+    }
+
     @Test fun nothingIsRecordedBeforeSyncIsTurnedOn() = runBlocking<Unit> {
         c.todo.addTask("Local only")
         c.notes.save("n", "Private", "")

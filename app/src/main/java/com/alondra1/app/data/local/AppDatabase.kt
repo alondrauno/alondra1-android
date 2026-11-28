@@ -13,8 +13,8 @@ import androidx.room.TypeConverters
 @Database(
     entities = [TaskListEntity::class, TaskEntity::class, NoteEntity::class, EventEntity::class, OutboxEntity::class, SyncIssueEntity::class,
         NoteFts::class, NoteFolderEntity::class, NoteAssetEntity::class, ListGroupEntity::class, CompletionRecordEntity::class,
-        TaskFileEntity::class],
-    version = 6,
+        TaskFileEntity::class, TagEntity::class, TagLinkEntity::class],
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -30,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun listGroups(): ListGroupDao
     abstract fun completions(): CompletionDao
     abstract fun taskFiles(): TaskFileDao
+    abstract fun tags(): TagDao
 
     companion object {
         const val NAME = "alondra1.db"
@@ -125,7 +126,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        /** 6 -> 7: tags and tag links (FEATURES_EXTENSION Part B §2). New tables only; existing data is untouched. */
+        val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                listOf(
+                    "CREATE TABLE IF NOT EXISTS `tags` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `color` TEXT, `createdUtc` INTEGER NOT NULL, `modifiedUtc` INTEGER NOT NULL, `deletedUtc` INTEGER, `serverVersion` INTEGER, `remoteJson` TEXT, PRIMARY KEY(`id`))",
+                    "CREATE INDEX IF NOT EXISTS `index_tags_deletedUtc` ON `tags` (`deletedUtc`)",
+                    "CREATE INDEX IF NOT EXISTS `index_tags_nameKey` ON `tags` (`nameKey`)",
+                    "CREATE TABLE IF NOT EXISTS `tag_links` (`id` TEXT NOT NULL, `tagId` TEXT NOT NULL, `objectType` TEXT NOT NULL, `objectRef` TEXT NOT NULL, `removed` INTEGER NOT NULL, `createdUtc` INTEGER NOT NULL, `modifiedUtc` INTEGER NOT NULL, `deletedUtc` INTEGER, `serverVersion` INTEGER, `remoteJson` TEXT, PRIMARY KEY(`id`))",
+                    "CREATE INDEX IF NOT EXISTS `index_tag_links_tagId` ON `tag_links` (`tagId`)",
+                    "CREATE INDEX IF NOT EXISTS `index_tag_links_objectType_objectRef` ON `tag_links` (`objectType`, `objectRef`)",
+                    "CREATE INDEX IF NOT EXISTS `index_tag_links_deletedUtc` ON `tag_links` (`deletedUtc`)",
+                ).forEach(db::execSQL)
+            }
+        }
+
+        val MIGRATIONS = arrayOf<androidx.room.migration.Migration>(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 
         fun build(context: Context, name: String? = NAME): AppDatabase {
             val builder = if (name == null) {
